@@ -1,0 +1,8 @@
+{
+  "name": "cayenabot",
+  "version": "1.0.0",
+  "description": "CayenaBot — AI PropTech Platform for CAYENA BEACH CONDOS",
+  "scripts": {
+    "start": "npx serve . -l 3000"
+  }
+}
