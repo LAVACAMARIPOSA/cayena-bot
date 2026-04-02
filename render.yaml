@@ -4,10 +4,14 @@ services:
     runtime: static
     buildCommand: ""
     staticPublishPath: .
+    pullRequestPreviewsEnabled: false
     headers:
       - path: /*
         name: Cache-Control
-        value: public, max-age=86400
+        value: public, max-age=3600
+      - path: /*.html
+        name: Content-Type
+        value: text/html; charset=utf-8
     routes:
       - type: rewrite
         source: /*
