@@ -2416,65 +2416,28 @@ function removeEl(el) {
 }
 
 // =============================================
-// CENTRALIZED IMAGE GENERATION (Pollinations + retry for 429)
+// CENTRALIZED IMAGE GENERATION
+// Together.ai PRIMARY → Pollinations fallback
 // =============================================
 let __imgGenActive = 0;
-const __IMG_MAX_CONCURRENT = 2; // low concurrency to avoid Pollinations 429
-let __lastPollRequest = 0; // rate limit tracker
+const __IMG_MAX_CONCURRENT = 3;
 
 async function generateImage(prompt, opts = {}) {
   const fast = opts.fast || false;
 
   // Concurrency gate
   while (__imgGenActive >= __IMG_MAX_CONCURRENT) {
-    await new Promise(r => setTimeout(r, 300 + Math.random() * 400));
+    await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
   }
   __imgGenActive++;
 
   try {
-    // Method 1: Pollinations via <img> tag (bypasses fetch 429 rate limits)
-    const pollinationsModels = ['flux', 'turbo'];
-    for (const model of pollinationsModels) {
-      try {
-        const seed = Date.now() + Math.floor(Math.random() * 10000);
-        const w = model === 'flux' ? 1280 : 1024;
-        const h = model === 'flux' ? 720 : 576;
-        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${model}&nologo=true&seed=${seed}`;
-
-        const result = await new Promise((resolve, reject) => {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          const timeout = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, fast ? 35000 : 65000);
-          img.onload = () => {
-            clearTimeout(timeout);
-            // Try to convert to data URL for local storage
-            try {
-              const c = document.createElement('canvas');
-              c.width = img.naturalWidth; c.height = img.naturalHeight;
-              c.getContext('2d').drawImage(img, 0, 0);
-              resolve(c.toDataURL('image/jpeg', 0.85));
-            } catch(e) {
-              // CORS canvas tainted — use URL directly
-              resolve(url);
-            }
-          };
-          img.onerror = () => { clearTimeout(timeout); reject(new Error('load failed')); };
-          img.src = url;
-        });
-        if (result) return result;
-      } catch(e) {
-        console.log(`Pollinations ${model} img-tag:`, e.message);
-        // Small delay before next attempt
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    }
-
-    // Method 2: Together.ai (if API key available — paid, very reliable)
+    // === PRIMARY: Together.ai FLUX.1-schnell-Free (fast, reliable, FREE model) ===
     const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
     if (togetherKey) {
       try {
         const r = await fetch('https://api.together.xyz/v1/images/generations', {
-          method: 'POST', signal: AbortSignal.timeout(fast ? 30000 : 60000),
+          method: 'POST', signal: AbortSignal.timeout(fast ? 25000 : 45000),
           headers: { 'Authorization': `Bearer ${togetherKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell-Free', prompt, width: 1024, height: 768, steps: 4, n: 1, response_format: 'b64_json' })
         });
@@ -2482,25 +2445,45 @@ async function generateImage(prompt, opts = {}) {
           const d = await r.json();
           const b64 = d.data?.[0]?.b64_json;
           if (b64) return `data:image/png;base64,${b64}`;
+        } else {
+          const errText = await r.text().catch(() => '');
+          console.log('Together.ai error:', r.status, errText.slice(0, 200));
         }
       } catch(e) { console.log('Together.ai:', e.message); }
     }
 
-    // Method 3: Pollinations fetch with retry (last resort)
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const seed = Date.now() + attempt;
-        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=turbo&nologo=true&seed=${seed}`;
-        const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-        if (r.status === 429) {
-          await new Promise(r => setTimeout(r, 3000 * Math.pow(2, attempt)));
-          continue;
-        }
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+    // === FALLBACK 1: Pollinations via <img> tag ===
+    try {
+      const seed = Date.now() + Math.floor(Math.random() * 10000);
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=flux&nologo=true&seed=${seed}`;
+      const result = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        const tmout = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, fast ? 25000 : 50000);
+        img.onload = () => {
+          clearTimeout(tmout);
+          try {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth; c.height = img.naturalHeight;
+            c.getContext('2d').drawImage(img, 0, 0);
+            resolve(c.toDataURL('image/jpeg', 0.85));
+          } catch(e) { resolve(url); }
+        };
+        img.onerror = () => { clearTimeout(tmout); reject(new Error('blocked')); };
+        img.src = url;
+      });
+      if (result) return result;
+    } catch(e) { console.log('Pollinations img:', e.message); }
+
+    // === FALLBACK 2: Pollinations fetch ===
+    try {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=turbo&nologo=true&seed=${Date.now()}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (r.ok) {
         const blob = await r.blob();
         if (blob.size > 500) return URL.createObjectURL(blob);
-      } catch(e) { console.log('Poll fetch retry', attempt, e.message); }
-    }
+      }
+    } catch(e) { console.log('Pollinations fetch:', e.message); }
 
     return null;
   } finally {
@@ -3298,6 +3281,20 @@ async function diagRenders() {
         img.onerror = () => { clearTimeout(timeout); reject(new Error('Image load failed (red o CORS)')); };
         img.src = url;
       });
+    }},
+    { name: 'Together.ai FLUX.1 (API)', fn: async (row) => {
+      const togKey = document.getElementById('together-key-input')?.value?.trim() || state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
+      if (!togKey) throw new Error('No Together.ai key — agrega una en el campo arriba');
+      const r = await fetch('https://api.together.xyz/v1/images/generations', {
+        method: 'POST', signal: AbortSignal.timeout(30000),
+        headers: { 'Authorization': `Bearer ${togKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell-Free', prompt: testPrompt, width: 512, height: 512, steps: 4, n: 1, response_format: 'b64_json' })
+      });
+      if (!r.ok) { const t = await r.text().catch(()=>''); throw new Error(`HTTP ${r.status}: ${t.slice(0,200)}`); }
+      const d = await r.json();
+      const b64 = d.data?.[0]?.b64_json;
+      if (!b64) throw new Error('No image data in response');
+      return { size: b64.length, url: `data:image/png;base64,${b64}` };
     }},
     { name: 'OpenRouter Gemini (imagen)', fn: async (row) => {
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
