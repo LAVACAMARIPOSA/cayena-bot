@@ -935,6 +935,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
             <div class="bfield"><label>Ubicacion *</label><input id="b-location" placeholder="Ej: Punta Cana, Republica Dominicana" /></div>
             <div class="bfield"><label>Desarrollador</label><input id="b-developer" placeholder="Ej: Grupo Inversiones XYZ" /></div>
           </div>
+          <div class="bfield"><label>Contexto de ubicación <span style="color:var(--gold);font-weight:400">(IMPORTANTE para renders precisos)</span></label><textarea id="b-location-context" placeholder="Describe la ubicación REAL del proyecto. Ej: Zona residencial elevada a 800m de la playa, rodeado de vegetación tropical, NO es frente de playa. Terreno con pendiente suave, vista parcial al mar desde pisos altos. Acceso por carretera principal." style="min-height:60px"></textarea></div>
+          <div class="bfield"><label>Google Maps URL <span style="color:var(--muted);font-weight:400">(opcional)</span></label><input id="b-maps-url" placeholder="Ej: https://maps.google.com/?q=19.7654,-70.4321" /></div>
           <div class="bfield"><label>Descripcion</label><textarea id="b-description" placeholder="Describe el proyecto..."></textarea></div>
           <div class="brow">
             <div class="bfield"><label>Telefono / WhatsApp *</label><input id="b-phone" placeholder="+1 (809) 000-0000" /></div>
@@ -3192,9 +3194,12 @@ function decomposeProjectTasks(projectInfo) {
   let id = 1;
   const name = projectInfo.name || 'Proyecto';
   const location = projectInfo.location || '';
+  const locationCtx = projectInfo.locationContext || '';
   const geo = detectGeoContext(location);
   const style = geo.architecture[0] || 'luxury Caribbean';
   const unitTypes = projectInfo.units || ['Villa', 'Townhouse', 'Apartamento'];
+  // Location context for accurate renders (e.g., "NOT beachfront, 800m from beach, elevated terrain")
+  const locPrompt = locationCtx ? `, IMPORTANT LOCATION CONTEXT: ${locationCtx}` : '';
 
   // Coordinator agents (1-3)
   tasks.push({ id: id++, type: 'coordinator', name: 'Coordinator Alpha', task: 'Inicializar swarm', taskFn: 'coord' });
@@ -3231,7 +3236,7 @@ function decomposeProjectTasks(projectInfo) {
   ];
   exteriorScenes.forEach((s, i) => {
     tasks.push({ id: id++, type: 'render', name: `Render Ext ${i+1}`, task: s.task, taskFn: 'render',
-      prompt: `${s.prompt}, ${name}, ${location}, photorealistic architectural render, 8K, professional real estate photography, no text no watermark` });
+      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}, photorealistic architectural render, 8K, professional real estate photography, no text no watermark` });
   });
 
   // Render agents — per unit type interiors (19-58)
@@ -3253,7 +3258,7 @@ function decomposeProjectTasks(projectInfo) {
   unitTypes.forEach(unit => {
     interiorScenes.forEach((s, i) => {
       tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,4)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
-        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}, photorealistic interior render, 8K, professional photography, no text no watermark` });
+        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}, photorealistic interior render, 8K, professional photography, no text no watermark` });
     });
   });
 
@@ -3440,17 +3445,30 @@ function parseProjectFromChat() {
   const info = {
     name: '',
     location: '',
+    locationContext: '',
     style: 'luxury modern Caribbean',
     units: ['Villa', 'Townhouse', 'Apartamento']
   };
 
-  // Try to extract project name
-  const nameMatch = history.match(/(?:proyecto|nombre|project)[\s:]+["']?([^"'\n,]+)/i);
-  if (nameMatch) info.name = nameMatch[1].trim();
+  // Try builder fields first (more reliable than chat parsing)
+  const bName = document.getElementById('b-name')?.value?.trim();
+  const bLoc = document.getElementById('b-location')?.value?.trim();
+  const bLocCtx = document.getElementById('b-location-context')?.value?.trim();
+  const bDesc = document.getElementById('b-description')?.value?.trim();
+  if (bName) info.name = bName;
+  if (bLoc) info.location = bLoc;
+  if (bLocCtx) info.locationContext = bLocCtx;
+  if (bDesc) info.description = bDesc;
 
-  // Location
-  const locMatch = history.match(/(?:ubicaci[oó]n|location|ubicado|en\s)[\s:]+["']?([^"'\n,]+)/i);
-  if (locMatch) info.location = locMatch[1].trim();
+  // Fallback: parse from chat history
+  if (!info.name) {
+    const nameMatch = history.match(/(?:proyecto|nombre|project)[\s:]+["']?([^"'\n,]+)/i);
+    if (nameMatch) info.name = nameMatch[1].trim();
+  }
+  if (!info.location) {
+    const locMatch = history.match(/(?:ubicaci[oó]n|location|ubicado|en\s)[\s:]+["']?([^"'\n,]+)/i);
+    if (locMatch) info.location = locMatch[1].trim();
+  }
 
   // Style
   if (history.includes('modern')) info.style = 'modern luxury';
