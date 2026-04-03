@@ -898,17 +898,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 }
 
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- Three.js (single version for all) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.165/build/three.min.js"></script>
+<!-- Pannellum -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
 <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
-<!-- Photo Sphere Viewer (advanced immersive tour) -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5/index.min.css">
-<script src="https://cdn.jsdelivr.net/npm/three@0.165/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5/index.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/markers-plugin@5/index.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/markers-plugin@5/index.min.css">
-<script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/virtual-tour-plugin@5/index.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/virtual-tour-plugin@5/index.min.css">
 </head>
 <body>
 
@@ -1256,7 +1250,6 @@ function deleteProject(idx) {
       <!-- View mode toggle + camera -->
       <div style="position:absolute;top:14px;left:14px;z-index:25;display:flex;gap:3px;background:rgba(0,0,0,0.5);border-radius:8px;padding:3px;backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.08)">
         <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(255,255,255,0.15);color:#fff;border:none;transition:all 0.15s">360</button>
-        <button id="tour-mode-psv" onclick="setTourMode('psv')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Inmersivo</button>
         <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Galeria</button>
         <button onclick="openCameraCapture()" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Capturar</button>
       </div>
