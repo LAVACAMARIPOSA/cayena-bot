@@ -1091,7 +1091,17 @@ if (localStorage.getItem('cayenabot_auth') === 'true') {
               <button onclick="document.getElementById('plan-chat-input').value='Analiza las medidas y distribución de cada unidad';sendPlanModification()" style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--muted);cursor:pointer">📏 Analizar medidas</button>
               <button onclick="document.getElementById('plan-chat-input').value='¿Qué mejoras arquitectónicas recomiendas para este diseño?';sendPlanModification()" style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--muted);cursor:pointer">💡 Sugerir mejoras</button>
               <button onclick="document.getElementById('plan-chat-input').value='Calcula los metros cuadrados de cada unidad y áreas comunes';sendPlanModification()" style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--muted);cursor:pointer">📐 Calcular m²</button>
+              <button onclick="visualModifyPlan()" id="plan-visual-modify-btn" style="font-size:11px;background:rgba(196,119,59,0.2);border:1px solid var(--gold);border-radius:6px;padding:4px 10px;color:var(--gold);cursor:pointer;font-weight:600">🎨 Modificar plano visualmente</button>
               <button onclick="renderUploadedPlan(document.getElementById('plan-original-img').src, this)" style="font-size:11px;background:rgba(196,119,59,0.2);border:1px solid var(--gold);border-radius:6px;padding:4px 10px;color:var(--gold);cursor:pointer;font-weight:600">✨ Generar Render 3D</button>
+            </div>
+            <!-- Visual modification result -->
+            <div id="plan-visual-result" style="display:none;margin-top:12px;background:rgba(0,0,0,0.2);border-radius:10px;padding:12px">
+              <div style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:8px">🎨 Plano Modificado por AI</div>
+              <img id="plan-modified-img" style="width:100%;border-radius:8px;display:block">
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button onclick="applyModifiedPlan()" style="flex:1;font-size:12px;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:6px;padding:8px;cursor:pointer;font-weight:600">✅ Usar este plano</button>
+                <button onclick="document.getElementById('plan-visual-result').style.display='none'" style="font-size:12px;background:var(--card);color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:8px;cursor:pointer">Descartar</button>
+              </div>
             </div>
           </div>
         </div>
@@ -5146,6 +5156,92 @@ function addPlanChat(role, text) {
   const isAi = role === 'ai';
   chat.innerHTML += `<div style="margin-bottom:8px;padding:8px 12px;background:${isAi ? 'rgba(196,119,59,0.1)' : 'rgba(74,124,247,0.1)'};border-radius:8px;border-left:3px solid ${isAi ? 'var(--gold)' : 'var(--blue)'}">${text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</div>`;
   chat.scrollTop = chat.scrollHeight;
+}
+
+async function visualModifyPlan() {
+  const modification = document.getElementById('plan-chat-input')?.value?.trim();
+  if (!modification) {
+    showToast('⚠️ Escribe la modificación que quieres en el campo de texto');
+    document.getElementById('plan-chat-input').focus();
+    return;
+  }
+
+  const planSrc = state.__currentPlanSrc;
+  if (!planSrc) { showToast('⚠️ No hay plano cargado'); return; }
+
+  const btn = document.getElementById('plan-visual-modify-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Modificando...';
+
+  addPlanChat('user', `🎨 Modificación visual: ${modification}`);
+  addPlanChat('ai', '⏳ Generando plano modificado con Gemini AI... (30-90s)');
+
+  try {
+    // Use OpenRouter Gemini with image input + output
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal: AbortSignal.timeout(120000),
+      headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-image-preview:free',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: planSrc } },
+            { type: 'text', text: `This is an architectural floor plan. Modify it according to this instruction: "${modification}".
+Keep the same drawing style, scale, and level of detail as the original.
+Keep all existing labels, measurements, and annotations.
+Only change what was requested. Output the modified floor plan as an image.` }
+          ]
+        }],
+        modalities: ['image', 'text']
+      })
+    });
+
+    const chat = document.getElementById('plan-chat');
+    if (chat.lastChild) chat.lastChild.remove();
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      addPlanChat('ai', `❌ Gemini respondió HTTP ${resp.status}. ${errText.slice(0, 100)}`);
+      btn.disabled = false;
+      btn.textContent = '🎨 Modificar plano visualmente';
+      return;
+    }
+
+    const d = await resp.json();
+    const msg = d.choices?.[0]?.message;
+    const imgUrl = __extractImageFromMsg(msg);
+
+    if (imgUrl) {
+      // Show the modified plan
+      document.getElementById('plan-modified-img').src = imgUrl;
+      document.getElementById('plan-visual-result').style.display = '';
+      addPlanChat('ai', `✅ Plano modificado generado. Revisa el resultado abajo. Si te gusta, toca "Usar este plano" para reemplazar el original.`);
+      state.__modifiedPlanSrc = imgUrl;
+    } else {
+      // Gemini might have responded with text only
+      const textContent = typeof msg?.content === 'string' ? msg.content : (Array.isArray(msg?.content) ? msg.content.map(p => p.text || '').join('') : '');
+      addPlanChat('ai', textContent || '⚠️ Gemini no generó imagen. Intenta con una instrucción más simple como "add a swimming pool in the center".');
+    }
+  } catch(e) {
+    const chat = document.getElementById('plan-chat');
+    if (chat.lastChild) chat.lastChild.remove();
+    addPlanChat('ai', `❌ Error: ${e.message}`);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🎨 Modificar plano visualmente';
+}
+
+function applyModifiedPlan() {
+  if (state.__modifiedPlanSrc) {
+    state.__currentPlanSrc = state.__modifiedPlanSrc;
+    document.getElementById('plan-original-img').src = state.__modifiedPlanSrc;
+    document.getElementById('plan-visual-result').style.display = 'none';
+    showToast('✅ Plano actualizado con la versión modificada');
+    addPlanChat('ai', '📐 Plano original reemplazado. Puedes seguir pidiendo modificaciones o analizar el nuevo plano.');
+  }
 }
 
 async function sendPlanModification() {
