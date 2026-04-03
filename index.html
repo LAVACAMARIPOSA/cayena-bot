@@ -1648,8 +1648,11 @@ function deleteProject(idx) {
       <div style="font-size:11px;color:var(--muted);margin-top:4px">Para renders locales con Draw Things o SD WebUI</div>
       <div class="settings-status" id="local-sd-status"></div>
     </div>
-    <!-- Hidden but kept for compatibility -->
-    <input type="hidden" id="hf-key-input" value="">
+    <div class="settings-field">
+      <label>HuggingFace Token <span style="color:var(--gold);font-weight:400">(panoramas 360° ILIMITADOS gratis)</span></label>
+      <input type="password" id="hf-key-input" placeholder="hf_...">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Gratis e ilimitado. Usa modelos entrenados para panoramas 360° reales (sdxl-360-diffusion). <a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--blue)">Obtener token gratis</a></div>
+    </div>
     <input type="hidden" id="together-key-input" value="">
     <div id="hf-status" style="display:none"></div>
     <div id="together-status" style="display:none"></div>
@@ -4541,11 +4544,49 @@ async function generateImage(prompt, opts = {}) {
     const providers = [];
 
     // Provider 0: Skybox AI (best 360° panoramas, if key available)
-    if (state.skyboxKey && prompt.toLowerCase().includes('panoram')) {
+    if (state.skyboxKey) {
       providers.push(async () => {
         const result = await generateSkybox360(prompt);
         if (result) { console.log('Skybox: ✅ 360° panorama'); return result; }
         throw new Error('Skybox failed');
+      });
+    }
+
+    // Provider 0.5: HuggingFace 360° panorama models (FREE, trained for equirectangular)
+    const hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
+    if (hfKey) {
+      // sdxl-360-diffusion: specifically trained on equirectangular images
+      providers.push(async () => {
+        const resp = await fetch('https://api-inference.huggingface.co/models/ProGamerGov/sdxl-360-diffusion', {
+          method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
+          headers: { 'Authorization': `Bearer ${hfKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inputs: `equirectangular 360 view, ${prompt}, photorealistic, high quality, seamless panorama`,
+            parameters: { width: 1024, height: 512, num_inference_steps: 25, guidance_scale: 7.5 }
+          })
+        });
+        if (!resp.ok) throw new Error('HF 360 HTTP ' + resp.status);
+        const blob = await resp.blob();
+        if (blob.size < 5000) throw new Error('HF 360 too small');
+        console.log('HF sdxl-360-diffusion: ✅ panorama generated!');
+        return await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+      });
+
+      // Flux panorama LoRA
+      providers.push(async () => {
+        const resp = await fetch('https://api-inference.huggingface.co/models/jbilcke-hf/flux-dev-panorama-lora-2', {
+          method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
+          headers: { 'Authorization': `Bearer ${hfKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inputs: `360 degree equirectangular panorama, ${prompt}, photorealistic, seamless, high detail`,
+            parameters: { width: 1536, height: 640 }
+          })
+        });
+        if (!resp.ok) throw new Error('HF Flux panorama HTTP ' + resp.status);
+        const blob = await resp.blob();
+        if (blob.size < 5000) throw new Error('HF Flux panorama too small');
+        console.log('HF flux-panorama-lora: ✅ panorama generated!');
+        return await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
       });
     }
 
