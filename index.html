@@ -609,13 +609,31 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* Fade transition */
 .fade-enter{animation:fadeIn 0.5s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-/* === THREE.JS PANORAMIC TOUR === */
-#tour-canvas{position:absolute;inset:0;width:100%!important;height:100%!important;cursor:grab;z-index:1;}
+/* === PANNELLUM 360° TOUR === */
+#pannellum-container{position:absolute;inset:0;z-index:1}
+#pannellum-container .pnlm-render-container{cursor:grab}
+#pannellum-container .pnlm-render-container:active{cursor:grabbing}
+/* Matterport-style hotspot */
+.cayena-hotspot{
+  background:rgba(0,0,0,0.6)!important;border:2px solid rgba(255,255,255,0.8)!important;
+  border-radius:20px!important;padding:6px 14px!important;
+  color:#fff!important;font-size:12px!important;font-weight:600!important;
+  backdrop-filter:blur(8px);transition:all 0.3s!important;cursor:pointer!important;
+  box-shadow:0 2px 12px rgba(0,0,0,0.4)!important;
+}
+.cayena-hotspot:hover{background:rgba(196,119,59,0.8)!important;border-color:var(--gold)!important;transform:scale(1.1)}
+.cayena-hotspot .pnlm-pointer{border-bottom-color:rgba(0,0,0,0.6)!important}
+/* Hide default pannellum UI we don't need */
+.pnlm-about-msg,.pnlm-orientation-button,.pnlm-hot-spot-debug-indicator{display:none!important}
+.pnlm-load-box{background:rgba(0,0,0,0.8)!important;color:var(--gold)!important;border-radius:12px!important}
+.pnlm-lbar-fill{background:var(--gold)!important}
+/* === THREE.JS PANORAMIC TOUR (fallback) === */
+#tour-canvas{position:absolute;inset:0;width:100%!important;height:100%!important;cursor:grab;z-index:0;display:none}
 #tour-canvas:active{cursor:grabbing}
 #tour-hotspot-overlay{position:absolute;inset:0;z-index:15;pointer-events:none}
 #tour-compass{
   position:absolute;top:72px;right:20px;z-index:25;
-  width:44px;height:44px;opacity:0.7;
+  width:44px;height:44px;opacity:0.7;display:none;
   background:rgba(0,0,0,0.4);border-radius:50%;
   border:1px solid rgba(255,255,255,0.2);
   display:flex;align-items:center;justify-content:center;
@@ -809,7 +827,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<!-- Puter.js removed: shows "Low Balance" popup that blocks UI -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
+<script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
 </head>
 <body>
 
@@ -840,13 +859,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div id="main-view">
     <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Pantalla completa">⛶</button>
 
-    <!-- VIRTUAL TOUR -->
+    <!-- VIRTUAL TOUR (Pannellum + THREE.js fallback) -->
     <div id="tour-view" class="tab-view active">
-      <canvas id="tour-canvas"></canvas>
+      <div id="pannellum-container" style="position:absolute;inset:0;z-index:1"></div>
+      <canvas id="tour-canvas" style="display:none"></canvas>
       <div id="tour-overlay"></div>
-      <div id="tour-compass" title="Vista 360° — arrastra para mirar">🧭</div>
-      <div id="tour-pano-hint">🖱️ Arrastra para mirar alrededor · Scroll para zoom</div>
-      
+
       <!-- Scene info bottom left -->
       <div id="scene-info">
         <div id="scene-label">Tour Virtual</div>
@@ -876,6 +894,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
       <!-- Matterport-style thumbnail strip -->
       <div id="tour-thumbstrip"></div>
+
+      <!-- Empty state -->
+      <div id="tour-empty" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5;pointer-events:none">
+        <div style="text-align:center;color:var(--muted)">
+          <div style="font-size:64px;margin-bottom:16px">🧭</div>
+          <div style="font-size:20px;font-weight:700;color:#fff;margin-bottom:8px">Tour Virtual</div>
+          <div style="font-size:13px;max-width:300px">Genera renders con el Swarm o sube imágenes para construir tu tour interactivo estilo Matterport</div>
+        </div>
+      </div>
     </div>
 
     <!-- GALLERY -->
@@ -1907,7 +1934,123 @@ Responde profesional, conciso y proactivo. Si no tiene info del proyecto, pregun
 // =============================================
 // TOUR ENGINE
 // =============================================
-// Three.js tour state
+// PANNELLUM TOUR ENGINE (Matterport-style)
+// =============================================
+let __pannellumViewer = null;
+
+function initPannellumTour() {
+  const container = document.getElementById('pannellum-container');
+  if (!container || typeof pannellum === 'undefined') return false;
+
+  const sceneKeys = Object.keys(SCENES);
+  if (sceneKeys.length === 0) return false;
+
+  // Hide empty state
+  const emptyEl = document.getElementById('tour-empty');
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  // Build Pannellum scene config from SCENES
+  const pScenes = {};
+  sceneKeys.forEach((k, i) => {
+    const s = SCENES[k];
+    const imgSrc = IMG[s.img]?.src || '';
+    if (!imgSrc) return;
+
+    const hotSpots = [];
+    // Add navigation hotspots from scene.nav
+    const dirs = { n: 'Norte', e: 'Siguiente', s: 'Sur', w: 'Anterior' };
+    const angles = { n: 0, e: 90, s: 180, w: -90 };
+    Object.entries(s.nav || {}).forEach(([dir, target]) => {
+      if (!target || !SCENES[target]) return;
+      const targetLabel = SCENES[target].label?.split('—').pop()?.trim() || 'Ir';
+      hotSpots.push({
+        pitch: -10,
+        yaw: angles[dir] || 0,
+        type: 'scene',
+        text: targetLabel,
+        sceneId: target,
+        cssClass: 'cayena-hotspot'
+      });
+    });
+
+    pScenes[k] = {
+      title: s.label,
+      type: 'equirectangular',
+      panorama: imgSrc,
+      autoLoad: true,
+      showFullscreenCtrl: false,
+      showZoomCtrl: false,
+      compass: true,
+      hotSpots: hotSpots,
+      hfov: 110,
+      minHfov: 50,
+      maxHfov: 120,
+      autoRotate: -1.5,
+      autoRotateInactivityDelay: 3000
+    };
+  });
+
+  if (Object.keys(pScenes).length === 0) return false;
+
+  // Destroy existing viewer
+  if (__pannellumViewer) {
+    try { __pannellumViewer.destroy(); } catch(e) {}
+    __pannellumViewer = null;
+  }
+
+  const firstScene = state.currentScene && pScenes[state.currentScene] ? state.currentScene : Object.keys(pScenes)[0];
+
+  try {
+    __pannellumViewer = pannellum.viewer('pannellum-container', {
+      default: {
+        firstScene: firstScene,
+        sceneFadeDuration: 800,
+        autoLoad: true,
+        showFullscreenCtrl: false,
+        showZoomCtrl: false,
+        compass: true,
+        mouseZoom: true,
+        draggable: true,
+        friction: 0.15
+      },
+      scenes: pScenes
+    });
+
+    // Listen for scene changes to update UI
+    __pannellumViewer.on('scenechange', (sceneId) => {
+      state.currentScene = sceneId;
+      state.visited.add(sceneId);
+      state.history.push(sceneId);
+      updateTourUI();
+      buildThumbstrip();
+    });
+
+    state.currentScene = firstScene;
+    window.__tourInited = true;
+    updateTourUI();
+    buildThumbstrip();
+    return true;
+  } catch(e) {
+    console.log('Pannellum init error:', e.message);
+    return false;
+  }
+}
+
+function pannellumGoToScene(key) {
+  if (__pannellumViewer && SCENES[key]) {
+    try {
+      __pannellumViewer.loadScene(key);
+      state.currentScene = key;
+      updateTourUI();
+      buildThumbstrip();
+    } catch(e) {
+      console.log('Pannellum scene change error:', e.message);
+    }
+  }
+}
+
+// =============================================
+// Three.js tour state (fallback)
 let __tourRenderer, __tourScene, __tourCamera, __tourSphere, __tourTexture, __tourMat;
 let __tourHotspotGroup = null;
 let __tourLook = { lon: 0, lat: 0, targetLon: 0, targetLat: 0 };
@@ -1917,9 +2060,13 @@ window.__tourInited = false;
 let __tourRAF = null;
 
 // =========================================
-// THREE.JS PANORAMIC TOUR ENGINE
+// THREE.JS PANORAMIC TOUR ENGINE (fallback if Pannellum fails)
 // =========================================
 function initTourEngine() {
+  // Try Pannellum first
+  if (typeof pannellum !== 'undefined' && Object.keys(SCENES).length > 0) {
+    if (initPannellumTour()) return;
+  }
   if (window.__tourInited) return;
   if (typeof THREE === 'undefined') { setTimeout(initTourEngine, 200); return; }
   window.__tourInited = true;
@@ -2121,8 +2268,16 @@ function goToScene(key, addHistory = true) {
   if (state.transitioning || key === state.currentScene) return;
   const scene = SCENES[key];
   if (!scene) return;
+
+  // Use Pannellum if available
+  if (__pannellumViewer) {
+    pannellumGoToScene(key);
+    if (addHistory) state.history.push(key);
+    return;
+  }
+
   state.transitioning = true;
-  
+
   // Update state first
   state.currentScene = key;
   state.visited.add(key);
@@ -3217,6 +3372,14 @@ function addToTour(src, label, opts = {}) {
   if (!state.currentScene) {
     state.currentScene = key;
   }
+
+  // Rebuild Pannellum tour with new scenes (debounced for swarm)
+  clearTimeout(state.__pannellumRebuildTimer);
+  state.__pannellumRebuildTimer = setTimeout(() => {
+    if (typeof pannellum !== 'undefined') {
+      initPannellumTour();
+    }
+  }, opts.silent ? 3000 : 500);
 }
 
 function downloadChatRender(btn) {
@@ -3403,8 +3566,16 @@ function decomposeProjectTasks(projectInfo) {
   const geo = detectGeoContext(location);
   const style = geo.architecture[0] || 'luxury Caribbean';
   const unitTypes = projectInfo.units || ['Villa', 'Townhouse', 'Apartamento'];
-  // Location context for accurate renders (e.g., "NOT beachfront, 800m from beach, elevated terrain")
   const locPrompt = locationCtx ? `, IMPORTANT LOCATION CONTEXT: ${locationCtx}` : '';
+
+  // Smart render calculation: more unit types = fewer scenes per unit to stay manageable
+  // but always enough to cover all spaces
+  const numUnits = unitTypes.length;
+  // If many different units (like E-1 through E-11), use fewer room types per unit
+  // If few unit types (Villa, Apt), use more room types per unit
+  const roomsPerUnit = numUnits <= 3 ? 13 : numUnits <= 6 ? 8 : numUnits <= 10 ? 5 : 3;
+  const totalRenders = 15 + (numUnits * roomsPerUnit);
+  console.log(`Smart render calc: ${numUnits} unit types × ${roomsPerUnit} rooms + 15 exterior = ${totalRenders} renders`);
 
   // Coordinator agents (1-3)
   tasks.push({ id: id++, type: 'coordinator', name: 'Coordinator Alpha', task: 'Inicializar swarm', taskFn: 'coord' });
@@ -3460,22 +3631,22 @@ function decomposeProjectTasks(projectInfo) {
     { task: 'Laundry', prompt: `modern laundry room, washer dryer, utility sink, storage cabinets, ${floors} flooring, clean design` },
     { task: 'Entrance hall', prompt: `unit entrance hallway, ${floors} flooring, ${walls} walls, coat closet, ${light}, welcoming atmosphere` }
   ];
+  // Use only the most important rooms based on roomsPerUnit
+  const prioritizedScenes = interiorScenes.slice(0, roomsPerUnit);
   unitTypes.forEach(unit => {
-    interiorScenes.forEach((s, i) => {
-      tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,4)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
+    prioritizedScenes.forEach((s, i) => {
+      tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,6)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
         prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}, photorealistic interior render, 8K, professional photography, no text no watermark` });
     });
   });
 
-  // Tour builder agents (59-68)
-  for (let i = 0; i < 10; i++) {
-    tasks.push({ id: id++, type: 'tour', name: `Tour Agent ${i+1}`, task: `Enlazar escenas ${i*5+1}-${(i+1)*5}`, taskFn: 'tour' });
-  }
+  // Tour builder agents (fewer - they just link scenes, renders already add to tour)
+  tasks.push({ id: id++, type: 'tour', name: 'Tour Builder', task: 'Construir navegación del tour', taskFn: 'tour' });
+  tasks.push({ id: id++, type: 'tour', name: 'Tour QA', task: 'Verificar enlaces del tour', taskFn: 'tour' });
 
-  // Gallery agents (69-73)
-  for (let i = 0; i < 5; i++) {
-    tasks.push({ id: id++, type: 'gallery', name: `Gallery ${i+1}`, task: `Optimizar lote ${i+1}`, taskFn: 'gallery' });
-  }
+  // Gallery agents
+  tasks.push({ id: id++, type: 'gallery', name: 'Gallery Build', task: 'Organizar galería', taskFn: 'gallery' });
+  tasks.push({ id: id++, type: 'gallery', name: 'Gallery Optimize', task: 'Optimizar imágenes', taskFn: 'gallery' });
 
   // Unit listing agents (74-78)
   unitTypes.forEach((unit, i) => {
@@ -3694,6 +3865,20 @@ function parseProjectFromChat() {
   if (history.includes('loft')) unitTypes.push('Loft');
   if (history.includes('penth')) unitTypes.push('Penthouse');
   if (unitTypes.length > 0) info.units = unitTypes;
+
+  // Also try to read unit types from builder form
+  const builderUnits = [];
+  document.querySelectorAll('#units-builder .unit-builder-row').forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    if (inputs[0] && inputs[0].value.trim()) {
+      builderUnits.push(inputs[0].value.trim());
+    }
+  });
+  if (builderUnits.length > 0) info.units = builderUnits;
+
+  // Read amenities for common area renders
+  const amenities = document.getElementById('b-amenities')?.value?.trim();
+  if (amenities) info.amenities = amenities;
 
   return info;
 }
