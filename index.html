@@ -1051,7 +1051,7 @@ function deleteProject(idx) {
     <button class="nav-btn" onclick="switchTab('builder')">🔨 Builder</button>
   </nav>
   <div id="header-right">
-    <button onclick="__autoSaveProject();document.getElementById('project-selector').style.display='';refreshProjectList()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--muted);font-size:12px;cursor:pointer" title="Mis Proyectos">📂 Proyectos</button>
+    <button onclick="__autoSaveProject();document.getElementById('project-selector').style.display='';refreshProjectList()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--muted);font-size:11px;cursor:pointer" title="Mis Proyectos">📂</button>
     <button id="chat-toggle-btn" onclick="toggleWorkspace()">📐 Preview</button>
     <button id="settings-btn" onclick="openSettings()">⚙️</button>
   </div>
@@ -1293,11 +1293,11 @@ function deleteProject(idx) {
           </div>
           <div class="bfield"><label>Descripcion</label><textarea id="b-description" placeholder="Describe el proyecto..."></textarea></div>
           <div class="brow">
-            <div class="bfield"><label>Telefono / WhatsApp *</label><input id="b-phone" placeholder="+1 (809) 000-0000" /></div>
             <div class="bfield"><label>Sitio Web</label><input id="b-website" placeholder="www.tuproyecto.com" /></div>
-          </div>
-          <div class="brow">
             <div class="bfield"><label>Email de Ventas</label><input id="b-email" placeholder="ventas@tuproyecto.com" /></div>
+          </div>
+          <input type="hidden" id="b-phone" value="">
+          <div class="brow">
             <div class="bfield"><label>ROI Estimado</label><input id="b-roi" placeholder="Ej: 8-12% anual" /></div>
           </div>
         </div>
@@ -1778,15 +1778,7 @@ function closeTutorial() {
   </div>
 </div>
 
-<!-- WhatsApp Float -->
-<a href="https://wa.me/18092223344?text=Hola%2C%20me%20interesa%20Cayena%20Residences" target="_blank" id="whatsapp-btn" 
-   style="position:fixed;bottom:24px;left:24px;z-index:500;width:52px;height:52px;border-radius:50%;
-          background:#25d366;display:flex;align-items:center;justify-content:center;
-          font-size:26px;text-decoration:none;box-shadow:0 4px 20px rgba(37,211,102,0.4);
-          transition:transform 0.2s;cursor:pointer" 
-   onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
-  💬
-</a>
+<!-- WhatsApp Float removed from CayenaBot internal tool -->
 
 <!-- FILE DROP OVERLAY -->
 <div id="file-drop-overlay">
