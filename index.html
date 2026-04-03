@@ -1361,19 +1361,30 @@ async function autoDetectLocation() {
   statusEl.innerHTML = '⏳ Buscando en Google Maps...';
 
   try {
-    // Use SerpAPI Google Maps to search for the location
-    const q = encodeURIComponent(locationInput);
-    const resp = await fetch(`https://serpapi.com/search.json?engine=google_maps&q=${q}&api_key=${__SERP_KEY}&hl=es`, {
-      signal: AbortSignal.timeout(15000)
-    });
+    // SerpAPI blocks CORS, so route through proxy
+    const serpUrl = `https://serpapi.com/search.json?engine=google_maps&q=${encodeURIComponent(locationInput)}&api_key=${__SERP_KEY}&hl=es`;
+    const proxies = [
+      `https://corsproxy.io/?url=${encodeURIComponent(serpUrl)}`,
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(serpUrl)}`
+    ];
 
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => '');
-      statusEl.innerHTML = `<span style="color:#e05">❌ Error: HTTP ${resp.status} — ${errText.slice(0, 100)}</span>`;
-      return;
+    let data = null;
+    for (const proxyUrl of proxies) {
+      try {
+        const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+        if (resp.ok) {
+          data = await resp.json();
+          break;
+        }
+      } catch(e) { /* try next proxy */ }
     }
 
-    const data = await resp.json();
+    if (!data) {
+      // Fallback: use AI to describe the location (no SerpAPI needed)
+      statusEl.innerHTML = '⏳ Proxy bloqueado, usando AI para describir ubicación...';
+      await aiDescribeLocation(locationInput, ctxEl, statusEl);
+      return;
+    }
 
     // Extract useful location data
     const place = data.place_results || data.local_results?.[0] || {};
@@ -1382,40 +1393,86 @@ async function autoDetectLocation() {
     const lng = gps.longitude;
     const address = place.address || place.formatted_address || '';
     const type = place.type || place.types?.join(', ') || '';
-    const rating = place.rating || '';
     const title = place.title || '';
+    const description = place.description || '';
 
-    // Also get nearby places for context
+    // Get nearby places for context
     const localResults = data.local_results || [];
-    const nearbyPlaces = localResults.slice(0, 5).map(p => p.title || p.name).filter(Boolean);
+    const nearbyPlaces = localResults.slice(0, 8).map(p => {
+      const parts = [p.title || p.name];
+      if (p.type) parts.push(`(${p.type})`);
+      return parts.join(' ');
+    }).filter(Boolean);
 
-    // Build a context description
+    // Build context
     let context = '';
-    if (title) context += `Ubicación: ${title}. `;
-    if (address) context += `Dirección: ${address}. `;
-    if (lat && lng) {
-      context += `Coordenadas: ${lat}, ${lng}. `;
-      // Estimate distance to coast (rough heuristic)
-      // This is approximate - SerpAPI doesn't give terrain data directly
-    }
-    if (type) context += `Tipo de zona: ${type}. `;
-    if (nearbyPlaces.length > 0) context += `Lugares cercanos: ${nearbyPlaces.join(', ')}. `;
+    if (title) context += `📍 ${title}\n`;
+    if (address) context += `Dirección: ${address}\n`;
+    if (lat && lng) context += `GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}\n`;
+    if (type) context += `Tipo: ${type}\n`;
+    if (description) context += `Descripción: ${description}\n`;
+    if (nearbyPlaces.length > 0) context += `\nLugares cercanos:\n${nearbyPlaces.map(p => '• ' + p).join('\n')}\n`;
+    context += '\n⚠️ REVISA y AJUSTA: ¿es frente de playa o tierra adentro? ¿terreno plano o elevado? ¿zona urbana o rural?';
 
-    // Append to existing context or set it
+    // Set context
     if (ctxEl.value.trim()) {
-      ctxEl.value = ctxEl.value.trim() + '\n\n📍 Datos de Google Maps:\n' + context;
+      ctxEl.value = ctxEl.value.trim() + '\n\n' + context;
     } else {
       ctxEl.value = context;
     }
 
-    statusEl.innerHTML = `<span style="color:#0c6">✅ Ubicación detectada${lat ? ` (${lat.toFixed(4)}, ${lng.toFixed(4)})` : ''}${nearbyPlaces.length ? ` — ${nearbyPlaces.length} lugares cercanos` : ''}</span>`;
-
-    // Auto-adjust textarea height
+    statusEl.innerHTML = `<span style="color:#0c6">✅ Detectado${lat ? ` (${lat.toFixed(4)}, ${lng.toFixed(4)})` : ''} — ${nearbyPlaces.length} lugares cercanos. <strong>Revisa y ajusta el contexto.</strong></span>`;
     ctxEl.style.height = 'auto';
     ctxEl.style.height = Math.min(ctxEl.scrollHeight, 200) + 'px';
 
   } catch(e) {
-    statusEl.innerHTML = `<span style="color:#e05">❌ ${e.message}</span>`;
+    // Fallback to AI description
+    statusEl.innerHTML = '⏳ Usando AI para describir ubicación...';
+    await aiDescribeLocation(locationInput, ctxEl, statusEl);
+  }
+}
+
+// Fallback: use OpenRouter AI to describe a location for render prompts
+async function aiDescribeLocation(location, ctxEl, statusEl) {
+  try {
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal: AbortSignal.timeout(30000),
+      headers: {
+        'Authorization': `Bearer ${state.orKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': location.href,
+        'X-Title': 'CayenaBot'
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.0-flash-exp:free',
+        messages: [{
+          role: 'user',
+          content: `Describe the physical location "${location}" for architectural render prompts. Include:
+1. Is it beachfront, near beach, or inland? Approximate distance to coast.
+2. Terrain: flat, hilly, elevated, mountainous?
+3. Vegetation type: tropical, desert, temperate?
+4. Surrounding area: urban, suburban, rural, resort zone?
+5. Climate and typical lighting conditions
+6. Any notable landmarks or features nearby
+Keep it concise (5-8 sentences). Write in Spanish. Be specific and accurate.`
+        }]
+      })
+    });
+    if (resp.ok) {
+      const d = await resp.json();
+      const text = d.choices?.[0]?.message?.content || '';
+      if (text) {
+        ctxEl.value = text + '\n\n⚠️ Generado por AI — revisa que sea correcto para tu proyecto específico.';
+        ctxEl.style.height = 'auto';
+        ctxEl.style.height = Math.min(ctxEl.scrollHeight, 200) + 'px';
+        statusEl.innerHTML = '<span style="color:#0c6">✅ Contexto generado por AI — revisa y ajusta</span>';
+        return;
+      }
+    }
+    statusEl.innerHTML = '<span style="color:#e05">❌ No se pudo obtener datos. Escribe el contexto manualmente.</span>';
+  } catch(e) {
+    statusEl.innerHTML = `<span style="color:#e05">❌ ${e.message}. Escribe el contexto manualmente.</span>`;
   }
 }
 
