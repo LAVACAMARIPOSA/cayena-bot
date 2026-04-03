@@ -609,6 +609,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* Fade transition */
 .fade-enter{animation:fadeIn 0.5s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+/* Ken Burns cinematic effect for flat tour */
+@keyframes kenBurns1{from{transform:scale(1.1) translate(0%,0%)}to{transform:scale(1.3) translate(-3%,-2%)}}
+@keyframes kenBurns2{from{transform:scale(1.15) translate(-2%,1%)}to{transform:scale(1.05) translate(2%,-1%)}}
+@keyframes kenBurns3{from{transform:scale(1.05) translate(2%,2%)}to{transform:scale(1.25) translate(-2%,0%)}}
+@keyframes kenBurns4{from{transform:scale(1.2) translate(-1%,-1%)}to{transform:scale(1.1) translate(1%,2%)}}
+#tour-flat-pan{overflow:hidden}
+#tour-flat-img{transform-origin:center center;will-change:transform}
 /* === PANNELLUM 360° TOUR === */
 #pannellum-container{position:absolute;inset:0;z-index:1}
 #pannellum-container .pnlm-render-container{cursor:grab}
@@ -1073,7 +1080,10 @@ function deleteProject(idx) {
         <button id="tour-prev-btn" onclick="tourFlatNav(-1)" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.6);color:#fff;border:2px solid rgba(255,255,255,0.3);border-radius:50%;width:48px;height:48px;font-size:22px;cursor:pointer;backdrop-filter:blur(8px);transition:all 0.2s;z-index:10" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(196,119,59,0.6)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.3)';this.style.background='rgba(0,0,0,0.6)'">‹</button>
         <button id="tour-next-btn" onclick="tourFlatNav(1)" style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.6);color:#fff;border:2px solid rgba(255,255,255,0.3);border-radius:50%;width:48px;height:48px;font-size:22px;cursor:pointer;backdrop-filter:blur(8px);transition:all 0.2s;z-index:10" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(196,119,59,0.6)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.3)';this.style.background='rgba(0,0,0,0.6)'">›</button>
         <!-- Scene counter -->
-        <div id="tour-counter" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.7);color:#fff;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;backdrop-filter:blur(8px);z-index:10"></div>
+        <div style="position:absolute;top:16px;right:16px;z-index:10;display:flex;gap:6px;align-items:center">
+          <button id="tour-autoplay-btn" onclick="toggleTourAutoplay()" style="background:rgba(0,0,0,0.6);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:20px;padding:6px 12px;font-size:12px;cursor:pointer;backdrop-filter:blur(8px);font-weight:600">▶ Auto</button>
+          <div id="tour-counter" style="background:rgba(0,0,0,0.7);color:#fff;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;backdrop-filter:blur(8px)"></div>
+        </div>
       </div>
       <!-- Pannellum 360 (hidden by default, toggle with button) -->
       <div id="pannellum-container" style="position:absolute;inset:0;z-index:1;display:none"></div>
@@ -2570,13 +2580,28 @@ function updateFlatTour() {
   const scene = SCENES[key];
   const imgSrc = IMG[scene.img]?.src || '';
 
-  // Update image with fade
+  // Update image with fade + Ken Burns cinematic effect
   const img = document.getElementById('tour-flat-img');
   img.style.opacity = '0';
+  img.style.transition = 'opacity 0.5s ease';
+  // Stop any existing Ken Burns
+  img.style.animation = 'none';
+
   setTimeout(() => {
     img.src = imgSrc;
     img.style.opacity = '1';
-  }, 150);
+    // Start Ken Burns effect after image loads
+    img.onload = () => {
+      // Random Ken Burns direction for variety
+      const effects = [
+        'kenBurns1 18s ease-in-out infinite alternate',
+        'kenBurns2 20s ease-in-out infinite alternate',
+        'kenBurns3 16s ease-in-out infinite alternate',
+        'kenBurns4 22s ease-in-out infinite alternate'
+      ];
+      img.style.animation = effects[__flatTourIdx % effects.length];
+    };
+  }, 200);
 
   // Update counter
   document.getElementById('tour-counter').textContent = `${__flatTourIdx + 1} / ${keys.length}`;
@@ -2688,8 +2713,23 @@ function applyTourPan() {
   });
 })();
 
+// Auto-play tour (advances every 8 seconds)
+let __tourAutoplay = null;
+
+function toggleTourAutoplay() {
+  const btn = document.getElementById('tour-autoplay-btn');
+  if (__tourAutoplay) {
+    clearInterval(__tourAutoplay);
+    __tourAutoplay = null;
+    if (btn) { btn.textContent = '▶ Auto'; btn.style.background = 'rgba(0,0,0,0.6)'; }
+  } else {
+    __tourAutoplay = setInterval(() => tourFlatNav(1), 8000);
+    if (btn) { btn.textContent = '⏸ Auto'; btn.style.background = 'rgba(196,119,59,0.6)'; }
+  }
+}
+
 function tourFlatNav(dir) {
-  resetTourPan(); // Reset pan/zoom when changing scene
+  resetTourPan();
   __flatTourIdx += dir;
   updateFlatTour();
 }
@@ -4502,7 +4542,7 @@ function decomposeProjectTasks(projectInfo) {
   ];
   exteriorScenes.slice(0, maxExterior).forEach((s, i) => {
     tasks.push({ id: id++, type: 'render', name: `Render Ext ${i+1}`, task: s.task, taskFn: 'render',
-      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, photorealistic architectural render, 8K, professional real estate photography, no text no watermark` });
+      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, equirectangular 360 degree panoramic photo, seamless panorama, photorealistic architectural render, ultra high quality, 8K, professional real estate photography, cinematic lighting, no text no watermark no logo` });
   });
 
   // Render agents — per unit type interiors (19-58)
@@ -4526,7 +4566,7 @@ function decomposeProjectTasks(projectInfo) {
   unitTypes.forEach(unit => {
     prioritizedScenes.forEach((s, i) => {
       tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,6)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
-        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, photorealistic interior render, 8K, professional photography, no text no watermark` });
+        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, equirectangular 360 degree panoramic interior photo, seamless panorama, photorealistic render, ultra high quality, 8K, professional interior photography, cinematic warm lighting, no text no watermark no logo` });
     });
   });
 
