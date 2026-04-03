@@ -1352,6 +1352,7 @@ if (localStorage.getItem('cayenabot_auth') === 'true') {
     </div>
     <button id="settings-test-btn" onclick="testConnections()">🔗 Probar Conexión</button>
     <button onclick="diagRenders()" style="background:var(--card);color:var(--text);border:1px solid var(--border)">🔍 Diagnosticar Renders</button>
+    <button onclick="runFullTest()" style="background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none">🧪 Test Completo de TODAS las funciones</button>
     <div id="diag-results" style="margin-top:12px;font-size:12px;max-height:300px;overflow-y:auto"></div>
     <button id="settings-save-btn" onclick="saveSettings()">💾 Guardar</button>
     <button onclick="showTutorial();closeSettings()" style="background:var(--card);color:var(--text);border:1px solid var(--border)">📖 Ver Tutorial</button>
@@ -4987,6 +4988,213 @@ async function diagRenders() {
 // =============================================
 // FLOOR PLANS ENGINE
 // =============================================
+// =============================================
+// FULL SYSTEM TEST
+// =============================================
+async function runFullTest() {
+  const out = document.getElementById('diag-results');
+  out.innerHTML = '';
+  const results = [];
+  let passed = 0, failed = 0, warnings = 0;
+
+  function log(name, status, detail) {
+    const icon = status === 'pass' ? '✅' : status === 'fail' ? '❌' : '⚠️';
+    const color = status === 'pass' ? '#0c6' : status === 'fail' ? '#e05' : '#f0c040';
+    if (status === 'pass') passed++; else if (status === 'fail') failed++; else warnings++;
+    results.push({ name, status, detail });
+    out.innerHTML += `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:${color};font-weight:700">${icon}</span> <strong>${name}</strong>: <span style="color:${color}">${detail}</span></div>`;
+    out.scrollTop = out.scrollHeight;
+  }
+
+  out.innerHTML = '<div style="color:var(--gold);font-weight:700;font-size:14px;margin-bottom:10px">🧪 Test Completo del Sistema — Probando TODAS las funciones...</div>';
+
+  // ===== 1. CORE STATE =====
+  log('Estado global', typeof state === 'object' && state ? 'pass' : 'fail', typeof state === 'object' ? 'state object OK' : 'state no existe');
+  log('API Key OpenRouter', state?.orKey?.length > 20 ? 'pass' : 'fail', state?.orKey ? `Key: ${state.orKey.slice(0,10)}...` : 'No hay key');
+  log('Modelos gratuitos', state?.freeModels?.length > 0 ? 'pass' : 'warn', `${state?.freeModels?.length || 0} modelos descubiertos`);
+
+  // ===== 2. DOM ELEMENTS =====
+  const domTests = [
+    ['chat-messages', 'Chat container'], ['chat-input', 'Chat input'], ['gallery-grid', 'Galería'],
+    ['tour-flat-viewer', 'Tour flat viewer'], ['tour-flat-img', 'Tour imagen'],
+    ['tour-thumbstrip', 'Thumbnails tour'], ['minimap', 'Minimap'],
+    ['tour-mode-flat', 'Botón vista plana'], ['tour-mode-360', 'Botón vista 360'],
+    ['swarm-overlay', 'Swarm overlay'], ['swarm-grid', 'Swarm grid'],
+    ['settings-modal', 'Settings modal'], ['plan-workspace', 'Plan workspace'],
+    ['style-wizard', 'Style wizard'], ['login-screen', 'Login screen'],
+    ['tutorial-overlay', 'Tutorial overlay'], ['pannellum-container', 'Pannellum container']
+  ];
+  domTests.forEach(([id, name]) => {
+    log(`DOM: ${name}`, document.getElementById(id) ? 'pass' : 'fail', document.getElementById(id) ? `#${id} existe` : `#${id} NO EXISTE`);
+  });
+
+  // ===== 3. FUNCTIONS EXIST =====
+  const fnTests = [
+    'generateImage', 'addMsg', 'addToTour', 'addRenderToGallery', 'buildGallery',
+    'openStyleWizard', 'closeStyleWizard', 'launchSwarmWithStyle', 'runSwarm',
+    'goToScene', 'updateFlatTour', 'tourFlatNav', 'setTourMode',
+    'initPannellumTour', 'buildThumbstrip', 'updateMinimap',
+    'openSettings', 'saveSettings', 'testConnections', 'diagRenders',
+    'exportProject', 'importProject', 'downloadSingleRender', 'downloadAllRenders',
+    'parseProjectFromChat', 'decomposeProjectTasks', 'executeAgent',
+    'retryRender', 'retryAllFailed', '__autoSaveProject', '__loadAutoSave',
+    'autoDetectLocation', 'sendPlanModification', 'visualModifyPlan',
+    'launchPlanAnalysis', 'autoFillFromPlan', 'processUploadedPlan',
+    'showTutorial', 'closeTutorial', 'doLogin'
+  ];
+  fnTests.forEach(fn => {
+    log(`Función: ${fn}`, typeof window[fn] === 'function' ? 'pass' : 'fail',
+      typeof window[fn] === 'function' ? 'definida' : 'NO EXISTE');
+  });
+
+  // ===== 4. LIBRARIES =====
+  log('Three.js', typeof THREE !== 'undefined' ? 'pass' : 'warn', typeof THREE !== 'undefined' ? `r${THREE.REVISION}` : 'No cargado');
+  log('Pannellum', typeof pannellum !== 'undefined' ? 'pass' : 'warn', typeof pannellum !== 'undefined' ? 'Cargado' : 'No cargado');
+
+  // ===== 5. GALLERY & SCENES =====
+  log('Imágenes (IMG)', 'pass', `${Object.keys(IMG).length} imágenes en memoria`);
+  log('Escenas (SCENES)', 'pass', `${Object.keys(SCENES).length} escenas en tour`);
+  log('Unidades (UNITS)', 'pass', `${typeof UNITS !== 'undefined' ? UNITS.length : 0} unidades`);
+  log('Planos (FLOOR_PLANS)', 'pass', `${Object.keys(FLOOR_PLANS).length} planos`);
+
+  // ===== 6. TOUR FUNCTIONALITY =====
+  if (Object.keys(SCENES).length > 0) {
+    const keys = Object.keys(SCENES);
+    // Test flat nav
+    try {
+      const origIdx = __flatTourIdx;
+      __flatTourIdx = 0;
+      updateFlatTour();
+      const img1 = document.getElementById('tour-flat-img').src;
+      tourFlatNav(1);
+      const img2 = document.getElementById('tour-flat-img').src;
+      log('Tour: navegación plana', img1 !== img2 || keys.length === 1 ? 'pass' : 'fail', `Navegó de escena 1 a 2`);
+      __flatTourIdx = origIdx;
+      updateFlatTour();
+    } catch(e) {
+      log('Tour: navegación plana', 'fail', e.message);
+    }
+
+    // Test goToScene
+    try {
+      goToScene(keys[0], false);
+      log('Tour: goToScene', state.currentScene === keys[0] ? 'pass' : 'fail', `Fue a ${keys[0]}`);
+    } catch(e) {
+      log('Tour: goToScene', 'fail', e.message);
+    }
+
+    // Test thumbstrip
+    try {
+      buildThumbstrip();
+      const strip = document.getElementById('tour-thumbstrip');
+      log('Tour: thumbnails', strip?.children?.length > 0 ? 'pass' : 'fail', `${strip?.children?.length || 0} thumbnails renderizados`);
+    } catch(e) {
+      log('Tour: thumbnails', 'fail', e.message);
+    }
+  } else {
+    log('Tour: navegación', 'warn', 'No hay escenas para probar — genera renders primero');
+  }
+
+  // ===== 7. STYLE WIZARD =====
+  try {
+    openStyleWizard();
+    const wiz = document.getElementById('style-wizard');
+    const archCards = document.getElementById('sw-arch-grid')?.children?.length || 0;
+    log('Wizard: abre correctamente', wiz?.style.display !== 'none' ? 'pass' : 'fail', 'Visible');
+    log('Wizard: cards arquitectura', archCards >= 6 ? 'pass' : 'fail', `${archCards} cards`);
+    closeStyleWizard();
+    log('Wizard: cierra correctamente', wiz?.style.display === 'none' ? 'pass' : 'fail', 'Cerrado');
+  } catch(e) {
+    log('Wizard', 'fail', e.message);
+  }
+
+  // ===== 8. NETWORK: OpenRouter Chat =====
+  try {
+    out.innerHTML += '<div style="padding:6px 0;color:var(--muted);font-size:11px">⏳ Probando conexión OpenRouter...</div>';
+    const chatResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST', signal: AbortSignal.timeout(15000),
+      headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+      body: JSON.stringify({ model: state.freeModels?.[0] || 'qwen/qwen3-235b-a22b:free', messages: [{ role: 'user', content: 'Say OK' }], max_tokens: 5 })
+    });
+    const chatData = await chatResp.json();
+    const chatReply = chatData.choices?.[0]?.message?.content || '';
+    log('Red: OpenRouter Chat', chatResp.ok && chatReply ? 'pass' : 'fail', chatResp.ok ? `Modelo respondió: "${chatReply.slice(0,30)}"` : `HTTP ${chatResp.status}`);
+  } catch(e) {
+    log('Red: OpenRouter Chat', 'fail', e.message);
+  }
+
+  // ===== 9. NETWORK: Image Generation (quick test) =====
+  try {
+    out.innerHTML += '<div style="padding:6px 0;color:var(--muted);font-size:11px">⏳ Probando generación de imagen (30-90s)...</div>';
+    const t0 = Date.now();
+    const imgResult = await generateImage('simple white modern house, blue sky', { fast: true });
+    const imgTime = ((Date.now() - t0) / 1000).toFixed(1);
+    if (imgResult) {
+      log('Red: Generación de imagen', 'pass', `Imagen generada en ${imgTime}s (${imgResult.slice(0, 30)}...)`);
+      // Show test image
+      out.innerHTML += `<div style="padding:8px 0"><img src="${imgResult}" style="height:80px;border-radius:8px;border:1px solid var(--border)"> <span style="font-size:11px;color:var(--muted)">${imgTime}s</span></div>`;
+    } else {
+      log('Red: Generación de imagen', 'fail', `Null después de ${imgTime}s — todos los proveedores fallaron`);
+    }
+  } catch(e) {
+    log('Red: Generación de imagen', 'fail', e.message);
+  }
+
+  // ===== 10. AUTO-SAVE =====
+  try {
+    __autoSaveProject();
+    const saved = localStorage.getItem('cayenabot_project');
+    log('Auto-guardado', saved ? 'pass' : 'warn', saved ? `${(saved.length / 1024).toFixed(0)}KB guardado en localStorage` : 'No se pudo guardar');
+  } catch(e) {
+    log('Auto-guardado', 'fail', e.message);
+  }
+
+  // ===== 11. EXPORT =====
+  try {
+    const project = {
+      name: state.projectName || 'Test', images: IMG, scenes: SCENES,
+      units: UNITS, floorPlans: FLOOR_PLANS, chatHistory: state.chatHistory.slice(-10)
+    };
+    const json = JSON.stringify(project);
+    log('Export JSON', json.length > 10 ? 'pass' : 'fail', `${(json.length / 1024).toFixed(0)}KB de datos exportables`);
+  } catch(e) {
+    log('Export JSON', 'fail', e.message);
+  }
+
+  // ===== 12. AI HORDE =====
+  try {
+    out.innerHTML += '<div style="padding:6px 0;color:var(--muted);font-size:11px">⏳ Probando AI Horde (submit only)...</div>';
+    const hordeResp = await fetch('https://aihorde.net/api/v2/generate/async', {
+      method: 'POST', signal: AbortSignal.timeout(10000),
+      headers: { 'Content-Type': 'application/json', 'apikey': '0000000000', 'Client-Agent': 'CayenaBot:1.0:test' },
+      body: JSON.stringify({ prompt: 'test house', params: { width: 64, height: 64, steps: 1, n: 1 }, models: ['stable_diffusion'], nsfw: true, censor_nsfw: false, r2: true, dry_run: true })
+    });
+    log('Red: AI Horde', hordeResp.ok ? 'pass' : 'fail', hordeResp.ok ? 'API accesible' : `HTTP ${hordeResp.status}`);
+  } catch(e) {
+    log('Red: AI Horde', 'fail', e.message);
+  }
+
+  // ===== 13. POLLINATIONS =====
+  try {
+    const pollResp = await fetch('https://corsproxy.io/?url=' + encodeURIComponent('https://image.pollinations.ai/prompt/test?width=64&height=64&nologo=true'), { signal: AbortSignal.timeout(15000) });
+    log('Red: Pollinations (proxy)', pollResp.ok ? 'pass' : 'fail', pollResp.ok ? `HTTP ${pollResp.status}, ${pollResp.headers.get('content-type')}` : `HTTP ${pollResp.status}`);
+  } catch(e) {
+    log('Red: Pollinations', 'fail', e.message);
+  }
+
+  // ===== SUMMARY =====
+  const total = passed + failed + warnings;
+  out.innerHTML += `<div style="margin-top:16px;padding:16px;background:rgba(${failed > 5 ? '224,80,80' : failed > 0 ? '240,192,64' : '0,204,102'},0.1);border-radius:12px;border:1px solid rgba(${failed > 5 ? '224,80,80' : failed > 0 ? '240,192,64' : '0,204,102'},0.3)">
+    <div style="font-size:18px;font-weight:800;color:#fff;margin-bottom:8px">🧪 Resultado: ${passed}/${total} tests pasados</div>
+    <div style="display:flex;gap:16px;font-size:14px;font-weight:600">
+      <span style="color:#0c6">✅ ${passed} OK</span>
+      <span style="color:#e05">❌ ${failed} fallidos</span>
+      <span style="color:#f0c040">⚠️ ${warnings} warnings</span>
+    </div>
+    ${failed > 0 ? `<div style="margin-top:10px;font-size:12px;color:var(--muted)">Tests fallidos:<br>${results.filter(r => r.status === 'fail').map(r => `• <strong>${r.name}</strong>: ${r.detail}`).join('<br>')}</div>` : ''}
+  </div>`;
+}
+
 function buildFloorPlans() {
   const grid = document.getElementById('floor-plans-grid');
   if (!grid) return;
