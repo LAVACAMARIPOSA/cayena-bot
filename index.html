@@ -1108,6 +1108,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="font-size:11px;color:var(--muted);margin-top:4px">$1 gratis al registrarte = ~1,000 renders. <a href="https://api.together.xyz/settings/api-keys" target="_blank" style="color:var(--blue)">Obtener key</a></div>
       <div class="settings-status" id="together-status"></div>
     </div>
+    <div class="settings-field">
+      <label>Stable Diffusion Local URL <span style="color:var(--muted);font-weight:400">(opcional — renders ilimitados GRATIS)</span></label>
+      <input type="text" id="local-sd-url-input" placeholder="http://localhost:7860">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Instala <a href="https://github.com/AUTOMATIC1111/stable-diffusion-webui" target="_blank" style="color:var(--blue)">Stable Diffusion WebUI</a> con <code>--api --listen --cors-allow-origins=*</code>. Renders ilimitados sin costo.</div>
+      <div class="settings-status" id="local-sd-status"></div>
+    </div>
     <button id="settings-test-btn" onclick="testConnections()">🔗 Probar Conexión</button>
     <button onclick="diagRenders()" style="background:var(--card);color:var(--text);border:1px solid var(--border)">🔍 Diagnosticar Renders</button>
     <div id="diag-results" style="margin-top:12px;font-size:12px;max-height:300px;overflow-y:auto"></div>
@@ -1649,6 +1655,7 @@ const state = {
   orKey: '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',
   hfKey: '',
   togetherKey: '',
+  localSdUrl: '',
   chatModel: 'google/gemini-2.5-pro-exp-03-25:free',
   renderResultData: null,
   lightboxIdx: 0,
@@ -2469,7 +2476,42 @@ async function generateImage(prompt, opts = {}) {
   __imgGenActive++;
 
   try {
-    // === PRIMARY: OpenRouter image generation (FREE, same key as chat!) ===
+    // === LOCAL SD: Stable Diffusion / Draw Things / ComfyUI (unlimited, free) ===
+    const sdUrl = state.localSdUrl;
+    if (sdUrl) {
+      try {
+        // Compatible with AUTOMATIC1111, Draw Things, Forge, ComfyUI API
+        const sdResp = await fetch(`${sdUrl}/sdapi/v1/txt2img`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(fast ? 60000 : 120000),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: `photorealistic architectural render, ${prompt}, high quality, 8k, professional photography`,
+            negative_prompt: 'cartoon, anime, drawing, sketch, low quality, blurry, text, watermark',
+            steps: fast ? 8 : 20,
+            cfg_scale: 7,
+            width: 1024,
+            height: 768,
+            sampler_name: 'DPM++ 2M',
+            scheduler: 'karras'
+          })
+        });
+        if (sdResp.ok) {
+          const sdData = await sdResp.json();
+          const b64 = sdData.images?.[0];
+          if (b64) {
+            console.log('Local SD: ✅ image generated!');
+            return `data:image/png;base64,${b64}`;
+          }
+        } else {
+          console.log(`Local SD: HTTP ${sdResp.status}`);
+        }
+      } catch(e) {
+        console.log('Local SD error:', e.message);
+      }
+    }
+
+    // === OPENROUTER: image generation (FREE, same key as chat!) ===
     for (const model of __OR_IMAGE_MODELS) {
       // Retry up to 2 times per model (handles 429 rate limits)
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -3222,8 +3264,10 @@ function openSettings() {
   document.getElementById('or-key-input').value = state.orKey || '';
   document.getElementById('hf-key-input').value = state.hfKey || '';
   document.getElementById('together-key-input').value = state.togetherKey || '';
+  document.getElementById('local-sd-url-input').value = state.localSdUrl || '';
   document.getElementById('or-status').innerHTML = '';
   document.getElementById('hf-status').innerHTML = '';
+  document.getElementById('local-sd-status').innerHTML = '';
   document.getElementById('settings-modal').classList.add('open');
 }
 function closeSettings() {
@@ -3236,6 +3280,9 @@ function saveSettings() {
   if (hfVal) { state.hfKey = hfVal; localStorage.setItem('cayenabot_hf_key', hfVal); }
   const togVal = document.getElementById('together-key-input').value.trim();
   if (togVal) { state.togetherKey = togVal; localStorage.setItem('cayenabot_together_key', togVal); }
+  const sdVal = document.getElementById('local-sd-url-input').value.trim().replace(/\/+$/, '');
+  if (sdVal) { state.localSdUrl = sdVal; localStorage.setItem('cayenabot_local_sd_url', sdVal); }
+  else { state.localSdUrl = ''; localStorage.removeItem('cayenabot_local_sd_url'); }
   closeSettings();
   showToast('✅ Configuración guardada');
 }
@@ -3305,6 +3352,26 @@ async function testConnections() {
   } else {
     document.getElementById('hf-status').innerHTML = '<span style="color:var(--muted)">Sin token — renders usarán Pollinations (más lento)</span>';
   }
+
+  // Test Local SD
+  const sdUrl = document.getElementById('local-sd-url-input')?.value?.trim()?.replace(/\/+$/, '') || state.localSdUrl;
+  if (sdUrl) {
+    document.getElementById('local-sd-status').innerHTML = '⏳ Probando conexión...';
+    try {
+      const r = await fetch(`${sdUrl}/sdapi/v1/sd-models`, { signal: AbortSignal.timeout(5000) });
+      if (r.ok) {
+        const models = await r.json();
+        const modelName = models[0]?.title || models[0]?.model_name || 'modelo detectado';
+        document.getElementById('local-sd-status').innerHTML = `<span class="status-ok">✅ Conectado — ${models.length} modelo(s): ${modelName}</span>`;
+      } else {
+        document.getElementById('local-sd-status').innerHTML = `<span class="status-err">❌ HTTP ${r.status} — revisa que SD WebUI esté corriendo con --api</span>`;
+      }
+    } catch(e) {
+      document.getElementById('local-sd-status').innerHTML = `<span class="status-err">❌ No se puede conectar: ${e.message}</span>`;
+    }
+  } else {
+    document.getElementById('local-sd-status').innerHTML = '<span style="color:var(--muted)">Sin URL — configura SD local para renders ilimitados</span>';
+  }
 }
 
 
@@ -3332,6 +3399,21 @@ async function diagRenders() {
   }
 
   const tests = [
+    { name: 'Stable Diffusion Local (ILIMITADO)', fn: async (row) => {
+      const sdUrl = document.getElementById('local-sd-url-input')?.value?.trim()?.replace(/\/+$/, '') || state.localSdUrl;
+      if (!sdUrl) throw new Error('No hay URL configurada — pon tu URL local en Opciones');
+      row.innerHTML = `<span>⏳</span> <strong>SD Local</strong>: generando imagen...`;
+      const r = await fetch(`${sdUrl}/sdapi/v1/txt2img`, {
+        method: 'POST', signal: AbortSignal.timeout(120000),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'photorealistic modern house, ' + testPrompt, negative_prompt: 'cartoon, anime, sketch, low quality', steps: 8, cfg_scale: 7, width: 512, height: 512, sampler_name: 'DPM++ 2M' })
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const b64 = d.images?.[0];
+      if (!b64) throw new Error('No image in response');
+      return { size: b64.length, url: `data:image/png;base64,${b64}` };
+    }},
     { name: 'Pollinations via CORS proxy (corsproxy.io)', fn: async (row) => {
       const seed = Date.now();
       const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=flux&nologo=true&seed=${seed}`;
@@ -3832,6 +3914,8 @@ function init() {
   if (savedHf) state.hfKey = savedHf;
   const savedTogether = localStorage.getItem('cayenabot_together_key');
   if (savedTogether) state.togetherKey = savedTogether;
+  const savedSdUrl = localStorage.getItem('cayenabot_local_sd_url');
+  if (savedSdUrl) state.localSdUrl = savedSdUrl;
   
   // Init tour UI
   updateTourUI();
