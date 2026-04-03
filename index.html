@@ -774,7 +774,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://js.puter.com/v2/"></script>
+<!-- Puter.js removed: shows "Low Balance" popup that blocks UI -->
 </head>
 <body>
 
@@ -2566,32 +2566,7 @@ async function generateImage(prompt, opts = {}) {
       }
     }
 
-    // === FALLBACK 1: Puter.js (free Gemini image gen, no API key needed) ===
-    if (typeof puter !== 'undefined' && puter.ai && puter.ai.txt2img) {
-      try {
-        console.log('Trying Puter.js txt2img...');
-        const result = await Promise.race([
-          puter.ai.txt2img(`Generate a high quality photorealistic architectural render of: ${prompt}`, {
-            provider: 'gemini',
-            model: 'gemini-2.5-flash-image-preview'
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Puter timeout')), fast ? 45000 : 90000))
-        ]);
-        // Puter returns an HTMLImageElement or a data URL or blob
-        if (result) {
-          if (result instanceof HTMLImageElement && result.src) return result.src;
-          if (result instanceof Blob) return URL.createObjectURL(result);
-          if (typeof result === 'string' && result.length > 100) return result;
-          if (result.src) return result.src;
-          if (result.url) return result.url;
-          console.log('Puter.js result type:', typeof result, result);
-        }
-      } catch(e) {
-        console.log('Puter.js image gen error:', e.message);
-      }
-    }
-
-    // === FALLBACK 2: AI Horde (truly free, unlimited, crowdsourced GPUs) ===
+    // === FALLBACK: AI Horde (truly free, unlimited, crowdsourced GPUs) ===
     try {
       console.log('Trying AI Horde...');
       const hordeSubmit = await fetch('https://aihorde.net/api/v2/generate/async', {
@@ -2645,7 +2620,7 @@ async function generateImage(prompt, opts = {}) {
       console.log('AI Horde error:', e.message);
     }
 
-    // === FALLBACK 3: CORS proxy → Pollinations ===
+    // === FALLBACK 2: CORS proxy → Pollinations ===
     const seed = Date.now() + Math.floor(Math.random() * 10000);
     const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&model=flux&nologo=true&seed=${seed}`;
     const proxies = [
@@ -2661,7 +2636,7 @@ async function generateImage(prompt, opts = {}) {
       } catch(e) { /* next proxy */ }
     }
 
-    // === FALLBACK 4: Together.ai ===
+    // === FALLBACK 3: Together.ai ===
     const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
     if (togetherKey) {
       try {
@@ -3533,23 +3508,6 @@ async function diagRenders() {
         img.onerror = () => { clearTimeout(timeout); reject(new Error('Image load failed (red o CORS)')); };
         img.src = url;
       });
-    }},
-    { name: 'Puter.js Gemini (GRATIS, sin API key)', fn: async (row) => {
-      if (typeof puter === 'undefined' || !puter.ai || !puter.ai.txt2img) throw new Error('Puter.js no cargó — revisa conexión');
-      row.innerHTML = `<span>⏳</span> <strong>Puter.js</strong>: generando imagen (puede tardar 30-60s)...`;
-      const result = await Promise.race([
-        puter.ai.txt2img('Generate a high quality photorealistic image of: ' + testPrompt, { provider: 'gemini', model: 'gemini-2.5-flash-image-preview' }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 90s')), 90000))
-      ]);
-      if (!result) throw new Error('No result returned');
-      let url;
-      if (result instanceof HTMLImageElement && result.src) url = result.src;
-      else if (result instanceof Blob) url = URL.createObjectURL(result);
-      else if (typeof result === 'string' && result.length > 100) url = result;
-      else if (result.src) url = result.src;
-      else if (result.url) url = result.url;
-      else throw new Error('Formato desconocido: ' + typeof result + ' ' + JSON.stringify(result).slice(0,200));
-      return { size: url.length, url };
     }},
     { name: 'AI Horde (GRATIS, ilimitado, sin API key)', fn: async (row) => {
       row.innerHTML = `<span>⏳</span> <strong>AI Horde</strong>: enviando petición...`;
