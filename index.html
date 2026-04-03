@@ -935,8 +935,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
             <div class="bfield"><label>Ubicacion *</label><input id="b-location" placeholder="Ej: Punta Cana, Republica Dominicana" /></div>
             <div class="bfield"><label>Desarrollador</label><input id="b-developer" placeholder="Ej: Grupo Inversiones XYZ" /></div>
           </div>
-          <div class="bfield"><label>Contexto de ubicación <span style="color:var(--gold);font-weight:400">(IMPORTANTE para renders precisos)</span></label><textarea id="b-location-context" placeholder="Describe la ubicación REAL del proyecto. Ej: Zona residencial elevada a 800m de la playa, rodeado de vegetación tropical, NO es frente de playa. Terreno con pendiente suave, vista parcial al mar desde pisos altos. Acceso por carretera principal." style="min-height:60px"></textarea></div>
-          <div class="bfield"><label>Google Maps URL <span style="color:var(--muted);font-weight:400">(opcional)</span></label><input id="b-maps-url" placeholder="Ej: https://maps.google.com/?q=19.7654,-70.4321" /></div>
+          <div class="bfield">
+            <label>Contexto de ubicación <span style="color:var(--gold);font-weight:400">(IMPORTANTE para renders precisos)</span></label>
+            <textarea id="b-location-context" placeholder="Describe la ubicación REAL del proyecto. Ej: Zona residencial elevada a 800m de la playa, rodeado de vegetación tropical, NO es frente de playa." style="min-height:60px"></textarea>
+            <button onclick="autoDetectLocation()" style="margin-top:6px;background:var(--card);color:var(--gold);border:1px solid var(--gold);border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;font-weight:600">📍 Auto-detectar ubicación desde Google Maps</button>
+            <div id="location-detect-status" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
+          </div>
           <div class="bfield"><label>Descripcion</label><textarea id="b-description" placeholder="Describe el proyecto..."></textarea></div>
           <div class="brow">
             <div class="bfield"><label>Telefono / WhatsApp *</label><input id="b-phone" placeholder="+1 (809) 000-0000" /></div>
@@ -1339,6 +1343,80 @@ function detectGeoContext(locationText) {
   }
   // Default to Caribbean
   return GEO_CONTEXT['caribbean'];
+}
+
+// SerpAPI key for Google Maps location lookup
+const __SERP_KEY = '1929e58edc2d10881870fa1ff5932109a367ace7115c0696eb168ded59eb6892';
+
+async function autoDetectLocation() {
+  const locationInput = document.getElementById('b-location')?.value?.trim();
+  const statusEl = document.getElementById('location-detect-status');
+  const ctxEl = document.getElementById('b-location-context');
+
+  if (!locationInput) {
+    statusEl.innerHTML = '<span style="color:#e05">⚠️ Primero escribe la ubicación arriba</span>';
+    return;
+  }
+
+  statusEl.innerHTML = '⏳ Buscando en Google Maps...';
+
+  try {
+    // Use SerpAPI Google Maps to search for the location
+    const q = encodeURIComponent(locationInput);
+    const resp = await fetch(`https://serpapi.com/search.json?engine=google_maps&q=${q}&api_key=${__SERP_KEY}&hl=es`, {
+      signal: AbortSignal.timeout(15000)
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      statusEl.innerHTML = `<span style="color:#e05">❌ Error: HTTP ${resp.status} — ${errText.slice(0, 100)}</span>`;
+      return;
+    }
+
+    const data = await resp.json();
+
+    // Extract useful location data
+    const place = data.place_results || data.local_results?.[0] || {};
+    const gps = place.gps_coordinates || data.search_parameters?.gps_coordinates || {};
+    const lat = gps.latitude;
+    const lng = gps.longitude;
+    const address = place.address || place.formatted_address || '';
+    const type = place.type || place.types?.join(', ') || '';
+    const rating = place.rating || '';
+    const title = place.title || '';
+
+    // Also get nearby places for context
+    const localResults = data.local_results || [];
+    const nearbyPlaces = localResults.slice(0, 5).map(p => p.title || p.name).filter(Boolean);
+
+    // Build a context description
+    let context = '';
+    if (title) context += `Ubicación: ${title}. `;
+    if (address) context += `Dirección: ${address}. `;
+    if (lat && lng) {
+      context += `Coordenadas: ${lat}, ${lng}. `;
+      // Estimate distance to coast (rough heuristic)
+      // This is approximate - SerpAPI doesn't give terrain data directly
+    }
+    if (type) context += `Tipo de zona: ${type}. `;
+    if (nearbyPlaces.length > 0) context += `Lugares cercanos: ${nearbyPlaces.join(', ')}. `;
+
+    // Append to existing context or set it
+    if (ctxEl.value.trim()) {
+      ctxEl.value = ctxEl.value.trim() + '\n\n📍 Datos de Google Maps:\n' + context;
+    } else {
+      ctxEl.value = context;
+    }
+
+    statusEl.innerHTML = `<span style="color:#0c6">✅ Ubicación detectada${lat ? ` (${lat.toFixed(4)}, ${lng.toFixed(4)})` : ''}${nearbyPlaces.length ? ` — ${nearbyPlaces.length} lugares cercanos` : ''}</span>`;
+
+    // Auto-adjust textarea height
+    ctxEl.style.height = 'auto';
+    ctxEl.style.height = Math.min(ctxEl.scrollHeight, 200) + 'px';
+
+  } catch(e) {
+    statusEl.innerHTML = `<span style="color:#e05">❌ ${e.message}</span>`;
+  }
 }
 
 // =============================================
