@@ -777,70 +777,124 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 }
 
 /* ===== MOBILE RESPONSIVE ===== */
+/* ============ MOBILE ============ */
 @media (max-width: 768px) {
-  #header { padding: 0 12px; height: 52px; }
-  #logo-text { font-size: 13px; }
-  #logo-sub { font-size: 9px; }
-  #nav { gap: 2px; }
-  .nav-btn { padding: 5px 8px; font-size: 11px; }
-  #chat-toggle-btn { padding: 6px 10px; font-size: 11px; }
-  
-  /* Mobile: chat full width, workspace hidden by default */
+  #header { padding: 0 10px; height: 48px; }
+  #logo { gap: 6px; }
+  #logo-icon { display: none; }
+  #logo-text { font-size: 14px; }
+  #logo-sub { display: none; }
+  #nav { gap: 0; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 2px; }
+  .nav-btn { padding: 6px 10px; font-size: 10px; border-radius: 6px; letter-spacing: 0; }
+  .nav-btn.active { background: rgba(255,255,255,0.12); }
+  #header-right { gap: 4px; }
+  #chat-toggle-btn { padding: 6px 10px; font-size: 10px; }
+  #settings-btn { font-size: 14px; padding: 6px 8px; }
+
+  /* Mobile layout: full width panels, swipe between chat and preview */
+  #app { flex-direction: column; }
   #chat-panel {
     flex: 1 !important;
     width: 100% !important;
+    min-width: 0 !important;
   }
   #main-view {
     display: none !important;
     position: fixed;
-    inset: 52px 0 0 0;
+    inset: 48px 0 0 0;
     z-index: 200;
     flex: none !important;
     width: 100% !important;
     border-left: none;
+    background: var(--bg);
   }
   #main-view.mobile-open {
     display: block !important;
   }
-  
-  /* Tour: bigger touch arrows */
-  #nav-arrows {
-    right: 12px; bottom: 70px;
-    grid-template-columns: 58px 58px 58px;
-    grid-template-rows: 58px 58px 58px;
+
+  /* Tour on mobile */
+  #tour-flat-viewer { touch-action: pan-x pan-y; }
+  #tour-prev-btn, #tour-next-btn { width: 44px; height: 44px; font-size: 20px; }
+  #tour-prev-btn { left: 8px; }
+  #tour-next-btn { right: 8px; }
+  #scene-info { bottom: 75px; left: 12px; right: 12px; }
+  #scene-label { font-size: 16px; }
+  #scene-sublabel { font-size: 11px; }
+
+  /* Tour thumbstrip: scrollable, touch-friendly */
+  #tour-thumbstrip {
+    padding: 30px 10px 10px;
     gap: 6px;
+    -webkit-overflow-scrolling: touch;
   }
-  .nav-arrow { border-radius: 14px; font-size: 26px; }
-  
-  /* Scene info */
-  #scene-info { bottom: 80px; left: 14px; }
-  #scene-label { font-size: 20px; }
-  
-  /* Minimap: horizontal scroll on mobile */
-  #minimap { 
-    left: 0; right: 0; bottom: 0; 
-    border-radius: 0; border-left: none; border-right: none; 
-    max-width: 100%; overflow-x: auto;
-    flex-wrap: nowrap; padding: 8px 14px;
+  .tour-thumb { width: 80px; height: 48px; }
+
+  /* Tour mode tabs */
+  #tour-view > div:first-child { top: 8px !important; left: 8px !important; }
+
+  /* Walk button */
+  #tour-walk-btn { width: 52px !important; height: 52px !important; font-size: 20px !important; }
+
+  /* Minimap: horizontal scroll */
+  #minimap {
+    left: 0; right: 0; bottom: 0;
+    border-radius: 0; max-width: 100%; overflow-x: auto;
+    flex-wrap: nowrap; padding: 6px 10px;
   }
-  
-  /* Gallery: 2 columns on mobile */
-  #gallery-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 14px; }
-  #gallery-view { padding: 14px; }
-  
-  /* Units: single column on mobile */
-  #units-view { padding: 14px; }
-  #units-grid { grid-template-columns: 1fr; gap: 14px; }
-  
-  /* Modals: full width on mobile */
-  #render-box, #settings-box { width: 95vw; padding: 20px; }
-  #lightbox-img { max-width: 98vw; max-height: 60vh; }
+
+  /* Gallery: 2 columns */
+  #gallery-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  #gallery-view { padding: 12px; }
+  .gallery-item { aspect-ratio: 1; }
+
+  /* Units */
+  #units-view { padding: 12px; }
+  #units-grid { grid-template-columns: 1fr; gap: 12px; }
+
+  /* Planos */
+  #plan-workspace > div:first-child { grid-template-columns: 1fr !important; }
+
+  /* Chat */
+  .toolbar { flex-wrap: wrap; gap: 4px; padding: 8px 12px; }
+  .toolbar-btn { padding: 5px 8px; font-size: 10px; }
+  #chat-input { font-size: 15px; padding: 12px 14px; }
+  .suggest-chips { padding: 6px 12px; gap: 4px; }
+  .suggest-chip { font-size: 11px; padding: 6px 10px; }
+  .msg-bubble { font-size: 14px; max-width: 95%; }
+
+  /* Modals: full screen on mobile */
+  #render-box, #settings-box { width: 100vw; max-height: 100vh; border-radius: 0; }
+  #lightbox-img, #lightbox-video { max-width: 100vw; max-height: 70vh; }
+
+  /* Swarm dashboard */
+  #swarm-overlay { padding: 0; }
+  #swarm-header { padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
+  #swarm-title { font-size: 16px; }
+  #swarm-stats { font-size: 11px; gap: 10px; }
+  #swarm-body { padding: 12px; }
+  #swarm-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .swarm-agent { padding: 8px; font-size: 11px; }
+
+  /* Style wizard */
+  #style-wizard > div { padding: 14px; }
+  .sw-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .sw-card img { height: 80px; }
+
+  /* Login & projects */
+  #login-screen > div { width: 94%; }
+  #project-selector > div { padding: 20px 14px; }
+
+  /* Camera capture */
+  #camera-modal > div { padding: 14px; }
+  #camera-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 380px) {
+  .nav-btn { padding: 5px 6px; font-size: 9px; }
+  #logo-text { font-size: 12px; }
+  #swarm-grid { grid-template-columns: 1fr; }
+  .sw-grid { grid-template-columns: 1fr; }
   #gallery-grid { grid-template-columns: 1fr; }
-  .nav-btn span { display: none; }
-  #logo-sub { display: none; }
 }
 
 </style>
@@ -4043,11 +4097,11 @@ function toggleChat() {
 }
 function toggleWorkspace() {
   const mv = document.getElementById('main-view');
-  // On mobile: toggle overlay
+  const btn = document.getElementById('chat-toggle-btn');
   if (window.innerWidth <= 768) {
-    mv.classList.toggle('mobile-open');
+    const isOpen = mv.classList.toggle('mobile-open');
+    if (btn) btn.textContent = isOpen ? 'Chat' : 'Preview';
   } else {
-    // On desktop: toggle visibility
     mv.style.display = mv.style.display === 'none' ? '' : 'none';
   }
 }
@@ -7789,7 +7843,24 @@ function init() {
   // Discover available free models from OpenRouter
   discoverFreeModels();
 
-  showToast('🏗️ CayenaBot listo — cuéntame sobre tu proyecto');
+  showToast('Listo');
+
+  // Mobile swipe: left=preview, right=chat
+  let _swipeStartX = 0;
+  document.addEventListener('touchstart', e => { _swipeStartX = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (window.innerWidth > 768) return;
+    const dx = e.changedTouches[0].clientX - _swipeStartX;
+    const mv = document.getElementById('main-view');
+    if (Math.abs(dx) < 80) return;
+    if (dx < -80 && !mv.classList.contains('mobile-open')) {
+      mv.classList.add('mobile-open');
+      document.getElementById('chat-toggle-btn').textContent = 'Chat';
+    } else if (dx > 80 && mv.classList.contains('mobile-open')) {
+      mv.classList.remove('mobile-open');
+      document.getElementById('chat-toggle-btn').textContent = 'Preview';
+    }
+  }, { passive: true });
   // Try load saved project
   loadProject();
 }
