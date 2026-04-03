@@ -858,44 +858,46 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </head>
 <body>
 
-<!-- LOGIN SCREEN — Multi-user avatar selection -->
-<div id="login-screen" style="position:fixed;inset:0;z-index:99999;background:linear-gradient(135deg,#0a0a1a 0%,#1a1a2e 50%,#0d1117 100%);display:flex;align-items:center;justify-content:center">
-  <div style="text-align:center;max-width:420px;width:90%">
-    <div style="font-size:56px;margin-bottom:16px">🏗️</div>
-    <h1 style="color:#fff;font-size:28px;font-weight:800;margin:0 0 4px;letter-spacing:-0.02em">CayenaBot</h1>
-    <p style="color:var(--gold);font-size:13px;text-transform:uppercase;letter-spacing:0.15em;margin:0 0 28px">AI PropTech Builder</p>
-
-    <!-- User selection -->
-    <div style="margin-bottom:20px">
-      <p style="color:var(--muted);font-size:13px;margin-bottom:12px">¿Quién eres?</p>
-      <div id="user-avatars" style="display:flex;justify-content:center;gap:12px;flex-wrap:wrap"></div>
+<!-- LOGIN -->
+<div id="login-screen" style="position:fixed;inset:0;z-index:99999;background:#0b0d14;display:flex;align-items:center;justify-content:center">
+  <div style="text-align:center;max-width:400px;width:92%">
+    <div style="margin-bottom:32px">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#c4773b" stroke-width="1.5" style="margin-bottom:12px"><path d="M3 21h18M3 7v1a3 3 0 006 0V7m0 0V4l6 3v3m0 0v1a3 3 0 006 0V10m0-3V4"/><path d="M6 21v-4m4 4v-6m4 6v-4m4 4v-8"/></svg>
+      <h1 style="color:#fff;font-size:26px;font-weight:700;margin:0;letter-spacing:-0.03em">CayenaBuilder</h1>
+      <p style="color:rgba(255,255,255,0.35);font-size:12px;letter-spacing:0.12em;text-transform:uppercase;margin:6px 0 0">AI PropTech Platform</p>
     </div>
 
-    <!-- Password (shows after selecting user) -->
-    <div id="login-pass-section" style="display:none;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-        <div id="login-selected-avatar" style="width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff"></div>
-        <div style="text-align:left">
-          <div id="login-selected-name" style="color:#fff;font-size:16px;font-weight:700"></div>
-          <div style="color:var(--muted);font-size:11px">Ingresa tu clave para continuar</div>
+    <p style="color:rgba(255,255,255,0.4);font-size:13px;margin-bottom:16px">Selecciona tu cuenta</p>
+    <div id="user-avatars" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap"></div>
+
+    <div id="login-pass-section" style="display:none;margin-top:24px">
+      <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:20px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <div id="login-selected-avatar" style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;letter-spacing:1px"></div>
+          <div style="text-align:left;flex:1">
+            <div id="login-selected-name" style="color:#fff;font-size:15px;font-weight:600"></div>
+            <div style="color:rgba(255,255,255,0.3);font-size:11px">Ingresa tu clave</div>
+          </div>
         </div>
+        <div style="display:flex;gap:8px">
+          <input id="login-pass" type="password" placeholder="------" autocomplete="current-password" style="flex:1;padding:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#fff;font-size:20px;letter-spacing:6px;outline:none;text-align:center;font-family:monospace" onkeydown="if(event.key==='Enter')doLogin()" onfocus="this.style.borderColor='#c4773b'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'">
+          <button onclick="doLogin()" style="padding:14px 20px;background:#c4773b;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity 0.2s" onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+        <div id="login-error" style="color:#ef4444;font-size:12px;margin-top:10px;display:none"></div>
       </div>
-      <div style="display:flex;gap:8px">
-        <input id="login-pass" type="password" placeholder="Clave" autocomplete="current-password" style="flex:1;padding:12px 16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:18px;letter-spacing:4px;outline:none;text-align:center" onkeydown="if(event.key==='Enter')doLogin()">
-        <button onclick="doLogin()" style="padding:12px 24px;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer">→</button>
-      </div>
-      <div id="login-error" style="color:#e05;font-size:13px;margin-top:10px;display:none"></div>
     </div>
-    <p style="color:rgba(255,255,255,0.15);font-size:10px;margin-top:24px">Powered by CayenaBot AI · v3.0</p>
+    <p style="color:rgba(255,255,255,0.1);font-size:10px;margin-top:32px">CayenaBuilder v3.1</p>
   </div>
 </div>
 <script>
 // Multi-user system
 const __USERS = [
-  { id: 'ISA', name: 'Isa', pass: '151202', color: '#e05090', emoji: '💩' },
-  { id: 'JAG', name: 'Jag', pass: '121174', color: '#c4773b', emoji: '🤬' },
-  { id: 'PAM', name: 'Pam', pass: '260572', color: '#5b8def', emoji: '🥰' },
-  { id: 'ALV', name: 'Alv', pass: '221297', color: '#10b981', emoji: '👨‍💻' }
+  { id: 'ISA', name: 'Isa', pass: '151202', color: '#e05090', initials: 'IS' },
+  { id: 'JAG', name: 'Jag', pass: '121174', color: '#c4773b', initials: 'JG' },
+  { id: 'PAM', name: 'Pam', pass: '260572', color: '#5b8def', initials: 'PM' },
+  { id: 'ALV', name: 'Alv', pass: '221297', color: '#10b981', initials: 'AL' }
 ];
 
 let __selectedUser = null;
@@ -906,10 +908,9 @@ let __currentUser = null;
   const container = document.getElementById('user-avatars');
   if (!container) return;
   container.innerHTML = __USERS.map(u => `
-    <div onclick="selectLoginUser('${u.id}')" id="avatar-${u.id}" style="cursor:pointer;text-align:center;transition:all 0.2s;padding:8px" onmouseenter="this.style.transform='scale(1.1)'" onmouseleave="this.style.transform='scale(1)'">
-      <div style="width:64px;height:64px;border-radius:50%;background:${u.color};display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 6px;border:3px solid transparent;transition:border-color 0.2s" id="avatar-circle-${u.id}">${u.emoji}</div>
-      <div style="color:#fff;font-size:14px;font-weight:700">${u.name}</div>
-      <div style="color:var(--muted);font-size:10px">${u.id}</div>
+    <div onclick="selectLoginUser('${u.id}')" id="avatar-${u.id}" style="cursor:pointer;text-align:center;transition:all 0.15s;padding:4px" onmouseenter="this.style.transform='translateY(-3px)'" onmouseleave="this.style.transform='translateY(0)'">
+      <div style="width:56px;height:56px;border-radius:12px;background:${u.color};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;letter-spacing:1px;margin:0 auto 8px;border:2px solid transparent;transition:all 0.2s;box-shadow:0 2px 12px ${u.color}33" id="avatar-circle-${u.id}">${u.initials}</div>
+      <div style="color:#fff;font-size:13px;font-weight:600">${u.name}</div>
     </div>
   `).join('');
 })();
@@ -928,7 +929,7 @@ function selectLoginUser(userId) {
   // Show password section
   document.getElementById('login-pass-section').style.display = '';
   document.getElementById('login-selected-avatar').style.background = user.color;
-  document.getElementById('login-selected-avatar').textContent = user.emoji;
+  document.getElementById('login-selected-avatar').textContent = user.initials;
   document.getElementById('login-selected-name').textContent = user.name;
   document.getElementById('login-pass').value = '';
   document.getElementById('login-pass').focus();
@@ -967,19 +968,22 @@ function doLogin() {
 </script>
 
 <!-- PROJECT SELECTOR (like ChatGPT conversation list) -->
-<div id="project-selector" style="display:none;position:fixed;inset:0;z-index:99998;background:linear-gradient(135deg,#0a0a1a 0%,#1a1a2e 50%,#0d1117 100%)">
-  <div style="max-width:800px;margin:0 auto;padding:30px 20px;height:100vh;display:flex;flex-direction:column">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+<div id="project-selector" style="display:none;position:fixed;inset:0;z-index:99998;background:#0b0d14">
+  <div style="max-width:680px;margin:0 auto;padding:40px 24px;height:100vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:28px">
       <div>
-        <h1 style="color:#fff;font-size:24px;margin:0;font-weight:800">🏗️ CayenaBot</h1>
-        <p style="color:var(--muted);font-size:13px;margin:4px 0 0">Selecciona un proyecto o crea uno nuevo</p>
+        <h1 style="color:#fff;font-size:22px;margin:0;font-weight:700;letter-spacing:-0.02em">Proyectos</h1>
+        <p style="color:rgba(255,255,255,0.35);font-size:12px;margin:4px 0 0">Selecciona un proyecto o crea uno nuevo</p>
       </div>
-      <button onclick="localStorage.removeItem('cayenabot_auth');document.getElementById('project-selector').style.display='none';document.getElementById('login-screen').style.display=''" style="background:var(--card);color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer">🚪 Cerrar sesión</button>
+      <button onclick="document.getElementById('project-selector').style.display='none';document.getElementById('login-screen').style.display=''" style="background:transparent;color:rgba(255,255,255,0.4);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;transition:all 0.2s" onmouseenter="this.style.borderColor='rgba(255,255,255,0.3)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.1)'">Cerrar sesion</button>
     </div>
-    <button onclick="startNewProject()" style="width:100%;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:12px;padding:16px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:20px;transition:transform 0.2s" onmouseenter="this.style.transform='scale(1.01)'" onmouseleave="this.style.transform='scale(1)'">➕ Nuevo Proyecto</button>
-    <div style="font-size:13px;color:var(--muted);font-weight:600;margin-bottom:10px">Proyectos guardados</div>
-    <div id="project-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
-    <p style="text-align:center;color:rgba(255,255,255,0.15);font-size:11px;margin-top:16px">Los proyectos se guardan en tu navegador · Exporta para respaldar</p>
+    <button onclick="startNewProject()" style="width:100%;background:#c4773b;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:24px;transition:opacity 0.2s;display:flex;align-items:center;justify-content:center;gap:8px" onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+      Nuevo Proyecto
+    </button>
+    <div style="font-size:12px;color:rgba(255,255,255,0.3);font-weight:500;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.08em">Recientes</div>
+    <div id="project-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px"></div>
+    <p style="text-align:center;color:rgba(255,255,255,0.08);font-size:10px;margin-top:16px">Los proyectos se guardan localmente en tu navegador</p>
   </div>
 </div>
 
@@ -988,21 +992,21 @@ function refreshProjectList() {
   const list = document.getElementById('project-list');
   const projects = getAllSavedProjects();
   if (projects.length === 0) {
-    list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">📂</div><div style="font-size:15px">No hay proyectos guardados</div><div style="font-size:12px;margin-top:4px">Crea uno nuevo para empezar</div></div>';
+    list.innerHTML = '<div style="text-align:center;padding:60px 20px;color:rgba(255,255,255,0.25)"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px;opacity:0.4"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg><div style="font-size:14px;font-weight:500">Sin proyectos</div><div style="font-size:12px;margin-top:4px;opacity:0.6">Crea uno nuevo para empezar</div></div>';
     return;
   }
   list.innerHTML = projects.map((p, i) => {
     const imgCount = Object.keys(p.images || {}).length;
     const sceneCount = Object.keys(p.scenes || {}).length;
-    const date = p.savedAt ? new Date(p.savedAt).toLocaleDateString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha';
-    const hasImages = Object.keys(p.images || {}).length > 0;
-    return `<div class="project-card" data-idx="${i}" style="display:flex;gap:14px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;cursor:pointer;transition:all 0.2s" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(196,119,59,0.05)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.06)';this.style.background='rgba(255,255,255,0.03)'">
-      <div style="width:72px;height:52px;border-radius:8px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">${hasImages ? '🖼️' : '🏗️'}</div>
+    const date = p.savedAt ? new Date(p.savedAt).toLocaleDateString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    const editor = p.lastEditedBy;
+    return `<div class="project-card" data-idx="${i}" style="display:flex;gap:14px;padding:14px 16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:10px;cursor:pointer;transition:all 0.15s" onmouseenter="this.style.borderColor='rgba(196,119,59,0.4)';this.style.background='rgba(255,255,255,0.04)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.05)';this.style.background='rgba(255,255,255,0.02)'">
+      ${editor ? `<div style="width:36px;height:36px;border-radius:8px;background:${editor.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;letter-spacing:0.5px;flex-shrink:0">${editor.id}</div>` : '<div style="width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg></div>'}
       <div style="flex:1;min-width:0">
-        <div style="font-size:15px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name || 'Sin nombre'}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.location || 'Sin ubicación'}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:10px">
-          <span>🖼️ ${imgCount} imgs</span><span>🧭 ${sceneCount} escenas</span><span>📅 ${date}</span>${p.lastEditedBy ? `<span style="background:${p.lastEditedBy.color};color:#fff;padding:1px 5px;border-radius:3px;font-weight:600">${p.lastEditedBy.id}</span>` : ''}
+        <div style="font-size:14px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name || 'Sin nombre'}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:3px;display:flex;gap:8px;align-items:center">
+          ${p.location ? `<span>${p.location}</span><span style="opacity:0.3">·</span>` : ''}
+          <span>${imgCount} imgs</span><span style="opacity:0.3">·</span><span>${sceneCount} escenas</span>${date ? `<span style="opacity:0.3">·</span><span>${date}</span>` : ''}
         </div>
       </div>
       <button class="proj-delete-btn" data-idx="${i}" style="background:none;border:none;color:rgba(224,80,80,0.5);font-size:16px;cursor:pointer;padding:4px;align-self:start" title="Eliminar">✕</button>
@@ -1155,22 +1159,22 @@ function deleteProject(idx) {
 <!-- HEADER -->
 <header id="header">
   <div id="logo">
-    <div id="logo-icon">🏗️</div>
+    <div id="logo-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c4773b" stroke-width="2"><path d="M3 21h18M3 7v1a3 3 0 006 0V7m0 0V4l6 3v3m0 0v1a3 3 0 006 0V10m0-3V4"/></svg></div>
     <div>
-      <span id="logo-text">CayenaBot</span>
-      <span id="logo-sub">AI PropTech Builder</span>
+      <span id="logo-text">CayenaBuilder</span>
+      <span id="logo-sub">AI PropTech</span>
     </div>
   </div>
   <nav id="nav">
-    <button class="nav-btn active" onclick="switchTab('tour')">🧭 Tour</button>
-    <button class="nav-btn" onclick="switchTab('gallery')">🖼️ Galería</button>
-    <button class="nav-btn" onclick="switchTab('units')">🏠 Unidades</button>
-    <button class="nav-btn" onclick="switchTab('planos')">🏗️ Planos AI</button>
-    <button class="nav-btn" onclick="switchTab('builder')">🔨 Builder</button>
+    <button class="nav-btn active" onclick="switchTab('tour')">Tour</button>
+    <button class="nav-btn" onclick="switchTab('gallery')">Galeria</button>
+    <button class="nav-btn" onclick="switchTab('units')">Unidades</button>
+    <button class="nav-btn" onclick="switchTab('planos')">Planos</button>
+    <button class="nav-btn" onclick="switchTab('builder')">Builder</button>
   </nav>
   <div id="header-right">
-    <button onclick="__autoSaveProject();document.getElementById('project-selector').style.display='';refreshProjectList()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--muted);font-size:11px;cursor:pointer" title="Mis Proyectos">📂</button>
-    <button id="chat-toggle-btn" onclick="toggleWorkspace()">📐 Preview</button>
+    <button onclick="__autoSaveProject();document.getElementById('project-selector').style.display='';refreshProjectList()" style="background:none;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:rgba(255,255,255,0.5);font-size:11px;cursor:pointer;transition:all 0.15s" title="Mis Proyectos" onmouseenter="this.style.borderColor='rgba(255,255,255,0.25)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.1)'">Proyectos</button>
+    <button id="chat-toggle-btn" onclick="toggleWorkspace()">Preview</button>
     <button id="settings-btn" onclick="openSettings()">⚙️</button>
     <div id="user-badge" style="width:32px;height:32px;border-radius:50%;display:none;align-items:center;justify-content:center;font-size:14px;cursor:pointer;border:2px solid rgba(255,255,255,0.2)" onclick="__autoSaveProject();location.reload()" title="Cambiar usuario"></div>
   </div>
@@ -1210,11 +1214,11 @@ function deleteProject(idx) {
       </div>
 
       <!-- View mode toggle + camera -->
-      <div style="position:absolute;top:16px;left:16px;z-index:25;display:flex;gap:4px;flex-wrap:wrap">
-        <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:var(--gold);color:#fff;border:none">🌐 360°</button>
-        <button id="tour-mode-psv" onclick="setTourMode('psv')" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🏠 Inmersivo</button>
-        <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🖼️ Galería</button>
-        <button onclick="openCameraCapture()" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">📷</button>
+      <div style="position:absolute;top:14px;left:14px;z-index:25;display:flex;gap:3px;background:rgba(0,0,0,0.5);border-radius:8px;padding:3px;backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.08)">
+        <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(255,255,255,0.15);color:#fff;border:none;transition:all 0.15s">360</button>
+        <button id="tour-mode-psv" onclick="setTourMode('psv')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Inmersivo</button>
+        <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Galeria</button>
+        <button onclick="openCameraCapture()" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Capturar</button>
       </div>
       <!-- Photo Sphere Viewer container -->
       <div id="psv-container" style="position:absolute;inset:0;z-index:1;display:none"></div>
@@ -1237,8 +1241,8 @@ function deleteProject(idx) {
           <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:8px">Tour Virtual</div>
           <div style="font-size:14px;margin-bottom:20px">Genera renders con AI o toma fotos reales del sitio</div>
           <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-            <button onclick="openCameraCapture()" style="padding:12px 24px;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">📷 Capturar fotos del sitio</button>
-            <button onclick="openStyleWizard()" style="padding:12px 24px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:14px;cursor:pointer">⚡ Generar con AI</button>
+            <button onclick="openCameraCapture()" style="padding:12px 24px;background:#c4773b;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity 0.2s" onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'">Capturar fotos del sitio</button>
+            <button onclick="openStyleWizard()" style="padding:12px 24px;background:rgba(255,255,255,0.06);color:#fff;border:1px solid rgba(255,255,255,0.1);border-radius:10px;font-size:14px;cursor:pointer;transition:all 0.2s" onmouseenter="this.style.borderColor='rgba(255,255,255,0.2)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.1)'">Generar con AI</button>
           </div>
           <p style="font-size:11px;margin-top:12px;color:rgba(255,255,255,0.3)">El sistema te guía paso a paso para tomar fotos profesionales</p>
         </div>
@@ -1528,13 +1532,13 @@ function deleteProject(idx) {
       </select>
     </div>
     <div id="project-toolbar">
-      <button class="toolbar-btn" onclick="newProject()">🆕 Nuevo</button>
-      <button class="toolbar-btn" onclick="saveProject()">💾 Guardar</button>
-      <button class="toolbar-btn" onclick="exportProject()">⬇️ Exportar</button>
-      <button class="toolbar-btn" onclick="exportPDFBrochure()">📄 PDF</button>
-      <button class="toolbar-btn" onclick="document.getElementById('import-input').click()">📂 Importar</button>
-      <button class="toolbar-btn" onclick="document.getElementById('upload-input').click()">📎 Subir archivos</button>
-      <button class="toolbar-btn" id="swarm-toggle-btn" onclick="toggleSwarmPanel()" style="display:none">⚡ Swarm</button>
+      <button class="toolbar-btn" onclick="newProject()">Nuevo</button>
+      <button class="toolbar-btn" onclick="saveProject()">Guardar</button>
+      <button class="toolbar-btn" onclick="exportProject()">Exportar</button>
+      <button class="toolbar-btn" onclick="exportPDFBrochure()">PDF</button>
+      <button class="toolbar-btn" onclick="document.getElementById('import-input').click()">Importar</button>
+      <button class="toolbar-btn" onclick="document.getElementById('upload-input').click()">Subir archivos</button>
+      <button class="toolbar-btn" id="swarm-toggle-btn" onclick="toggleSwarmPanel()" style="display:none">Swarm</button>
       <input type="file" id="import-input" accept=".json" style="display:none" onchange="importProject(this.files[0]);this.value=''">
       <input type="file" id="upload-input" accept="image/*,.zip,.pdf,.dwg,.dxf,.skp,.fbx,.obj,.gltf,.glb,.3ds,.stl,.rvt" multiple style="display:none" onchange="handleFileUpload(this.files);this.value=''">
     </div>
@@ -3015,20 +3019,21 @@ function setTourMode(mode) {
 
   // Reset all
   [flatViewer, pannContainer, psvContainer].forEach(el => { if(el) el.style.display = 'none'; });
-  [btnFlat, btn360, btnPsv].forEach(btn => { if(btn) { btn.style.background = inactiveStyle; btn.style.border = '1px solid rgba(255,255,255,0.3)'; }});
+  [btnFlat, btn360, btnPsv].forEach(btn => {
+    if(btn) { btn.style.background = 'transparent'; btn.style.color = 'rgba(255,255,255,0.5)'; btn.style.border = 'none'; }
+  });
 
   if (mode === 'flat') {
     flatViewer.style.display = 'flex';
-    btnFlat.style.background = 'var(--gold)'; btnFlat.style.border = 'none';
+    btnFlat.style.background = 'rgba(255,255,255,0.15)'; btnFlat.style.color = '#fff';
     updateFlatTour();
   } else if (mode === 'psv') {
     psvContainer.style.display = '';
-    btnPsv.style.background = 'var(--gold)'; btnPsv.style.border = 'none';
+    btnPsv.style.background = 'rgba(255,255,255,0.15)'; btnPsv.style.color = '#fff';
     if (!__psvViewer) initPSVTour();
   } else {
-    // 360 (Pannellum)
     pannContainer.style.display = '';
-    btn360.style.background = 'var(--gold)'; btn360.style.border = 'none';
+    btn360.style.background = 'rgba(255,255,255,0.15)'; btn360.style.color = '#fff';
     if (!__pannellumViewer) initPannellumTour();
   }
 }
@@ -4682,8 +4687,18 @@ async function generateImage(prompt, opts = {}) {
       });
     }
 
-    // RACE: first provider to return a valid image wins
-    const result = await Promise.any(providers.map(fn => fn()));
+    // COHERENT mode: try providers in ORDER (not race) for consistent style
+    // RACE mode: fire all simultaneously for speed (single renders from chat)
+    let result = null;
+    if (opts.coherent && providers.length > 0) {
+      // Try each provider in order — once one works, stick with it for all renders
+      for (const fn of providers) {
+        try { result = await fn(); if (result) break; } catch(e) { continue; }
+      }
+    } else {
+      // Race mode for individual renders
+      try { result = await Promise.any(providers.map(fn => fn())); } catch(e) {}
+    }
     if (result) return result;
 
     return null;
@@ -5376,7 +5391,7 @@ async function executeAgent(agent) {
             swarmLog(agent.name, `🔄 Reintentando (${retry}/2)...`);
             await new Promise(r => setTimeout(r, 2000 * retry));
           }
-          imgUrl = await generateImage(agent.prompt, { fast: true });
+          imgUrl = await generateImage(agent.prompt, { fast: true, coherent: true });
         }
         if (imgUrl) {
           agent.renderUrl = imgUrl;
@@ -5421,7 +5436,7 @@ async function retryRender(agentId) {
   swarmLog(agent.name, '🔄 Reintentando render...');
 
   try {
-    const imgUrl = await generateImage(agent.prompt, { fast: true });
+    const imgUrl = await generateImage(agent.prompt, { fast: true, coherent: true });
     if (imgUrl) {
       agent.renderUrl = imgUrl;
       agent.status = 'done';
