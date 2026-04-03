@@ -2697,7 +2697,50 @@ const state = {
   pendingImages: []  // base64 images waiting to be sent with next message
 };
 
+// =============================================
+// WEB SEARCH (SerpAPI via CORS proxy)
+// =============================================
+async function webSearch(query) {
+  try {
+    const serpUrl = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&api_key=${__SERP_KEY}&hl=es&gl=do&num=5`;
+    const proxies = [
+      `https://corsproxy.io/?url=${encodeURIComponent(serpUrl)}`,
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(serpUrl)}`
+    ];
+    for (const proxyUrl of proxies) {
+      try {
+        const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const results = [];
+        // Extract organic results
+        (data.organic_results || []).slice(0, 5).forEach(r => {
+          results.push({ title: r.title, snippet: r.snippet, url: r.link });
+        });
+        // Extract answer box if available
+        if (data.answer_box?.snippet) results.unshift({ title: 'Respuesta directa', snippet: data.answer_box.snippet, url: '' });
+        if (data.answer_box?.answer) results.unshift({ title: 'Respuesta', snippet: data.answer_box.answer, url: '' });
+        // Knowledge graph
+        if (data.knowledge_graph?.description) results.push({ title: data.knowledge_graph.title || 'Info', snippet: data.knowledge_graph.description, url: '' });
+        return results;
+      } catch(e) { continue; }
+    }
+  } catch(e) {
+    console.log('Web search error:', e.message);
+  }
+  return [];
+}
+
+// Detect if a user message needs web search
+function needsWebSearch(text) {
+  const searchPatterns = /(?:busca|search|investiga|averigua|cuánto cuesta|precio(?:s)? de|costo(?:s)? de|cuál es el|dónde (?:queda|está)|info(?:rmación)? (?:sobre|de)|datos de|mercado (?:de|en)|qué dice|noticias|actualiza|encuentra|consulta|compara precios|materiales en|m2 en|metro cuadrado|USD|dólar|RD\$|zonificación|normativa|código de construcción|reglamento|ley de|permiso de|licencia de|impuesto|tasa de|tendencia|demanda|oferta|comparable|comp(?:s)? de ventas)/i;
+  return searchPatterns.test(text);
+}
+
 const SYSTEM_PROMPT = `Eres CayenaBot, un asistente AI especializado en crear contenido inmobiliario profesional con renders hiperrealistas ricos en materiales, mobiliario y detalles arquitectónicos reales.
+
+CAPACIDAD DE BÚSQUEDA WEB:
+Tienes acceso a internet vía búsqueda web. Cuando te den resultados de búsqueda entre [BÚSQUEDA WEB], úsalos para dar respuestas precisas y actualizadas. Cita las fuentes cuando sea relevante. Si los resultados no son suficientes, dilo y sugiere buscar más específicamente.
 
 TU ROL:
 - Recibes información de proyectos inmobiliarios y generas contenido visual profesional
@@ -3848,6 +3891,28 @@ async function sendChat() {
   const thinkEl = addThinking();
   // Add stop button to thinking indicator
   thinkEl.querySelector('.msg-bubble').innerHTML += ' <button onclick="stopChatResponse()" style="background:rgba(224,80,80,0.2);color:#e05;border:1px solid rgba(224,80,80,0.3);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;margin-left:8px">⏹ Detener</button>';
+
+  // Web search: if the message looks like it needs current data, search first
+  let webContext = '';
+  if (needsWebSearch(text)) {
+    try {
+      thinkEl.querySelector('.msg-bubble').childNodes[0].textContent = '🔍 Buscando en internet...';
+      const searchResults = await webSearch(text);
+      if (searchResults.length > 0) {
+        webContext = '\n\n[BÚSQUEDA WEB — resultados actualizados de Google]:\n' + searchResults.map((r, i) => `${i+1}. ${r.title}: ${r.snippet}${r.url ? ' (' + r.url + ')' : ''}`).join('\n') + '\n[FIN BÚSQUEDA]\n';
+        thinkEl.querySelector('.msg-bubble').childNodes[0].textContent = '💭 Pensando con datos de internet...';
+      }
+    } catch(e) { /* continue without search */ }
+  }
+
+  // Append web context to the last user message in history
+  if (webContext && state.chatHistory.length > 0) {
+    const lastMsg = state.chatHistory[state.chatHistory.length - 1];
+    if (typeof lastMsg.content === 'string') {
+      lastMsg.content += webContext;
+    }
+  }
+
   const orKey = state.orKey;
   let model = document.getElementById('chat-model-select').value;
 
