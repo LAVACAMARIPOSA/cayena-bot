@@ -2387,6 +2387,64 @@ function removeEl(el) {
 }
 
 // =============================================
+// CENTRALIZED IMAGE GENERATION (multi-provider fallback)
+// =============================================
+async function generateImage(prompt) {
+  const providers = [
+    // 1. Pollinations.ai (free, no key)
+    async () => {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!r.ok) throw new Error('Pollinations ' + r.status);
+      return URL.createObjectURL(await r.blob());
+    },
+    // 2. Pollinations.ai alternate endpoint
+    async () => {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=turbo&nologo=true&seed=${Date.now()+1}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!r.ok) throw new Error('Pollinations turbo ' + r.status);
+      return URL.createObjectURL(await r.blob());
+    },
+    // 3. HuggingFace SDXL (if key available)
+    async () => {
+      const hfKey = state.hfKey || localStorage.getItem('hf_key') || localStorage.getItem('cayenabot_hf_key') || '';
+      if (!hfKey) throw new Error('No HF key');
+      const r = await fetch('https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0', {
+        method: 'POST', signal: AbortSignal.timeout(60000),
+        headers: { 'Authorization': `Bearer ${hfKey.trim()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inputs: prompt, parameters: { num_inference_steps: 25, guidance_scale: 7.5, width: 1024, height: 576 } })
+      });
+      if (!r.ok) throw new Error('HF ' + r.status);
+      return URL.createObjectURL(await r.blob());
+    },
+    // 4. Together.ai free FLUX (if key available)
+    async () => {
+      const key = localStorage.getItem('cayenabot_together_key') || '';
+      if (!key) throw new Error('No Together key');
+      const r = await fetch('https://api.together.xyz/v1/images/generations', {
+        method: 'POST', signal: AbortSignal.timeout(30000),
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell', prompt, width: 1024, height: 768, steps: 4, n: 1 })
+      });
+      if (!r.ok) throw new Error('Together ' + r.status);
+      const d = await r.json();
+      return d.data?.[0]?.url || d.data?.[0]?.b64_json;
+    }
+  ];
+
+  for (const provider of providers) {
+    try {
+      const result = await provider();
+      if (result) return result;
+    } catch(e) {
+      console.log('Image provider failed:', e.message);
+      continue;
+    }
+  }
+  return null; // all failed
+}
+
+// =============================================
 // AUTO-RENDER FROM CHAT DESCRIPTION
 // =============================================
 let renderQueue = [];
@@ -2424,18 +2482,11 @@ async function generateRenderFromChat(prompt, label) {
   const fullPrompt = prompt + ', professional architecture photography, 8K, ultra-realistic, photorealistic, architectural visualization';
 
   try {
-    // Generate image via Pollinations.ai (free, no API key needed)
-    const encodedPrompt = encodeURIComponent(fullPrompt);
-    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
-
-    const resp = await fetch(pollinationsUrl);
-    if (!resp.ok) throw new Error('Pollinations.ai no respondió');
-    const blob = await resp.blob();
-    const imgSrc = URL.createObjectURL(blob);
+    const imgSrc = await generateImage(fullPrompt);
 
     if (!imgSrc) {
       removeEl(statusMsg);
-      addMsg('assistant', `⚠️ No se pudo generar el render. Intenta de nuevo.`);
+      addMsg('assistant', `⚠️ No se pudo generar el render. Todos los proveedores fallaron. Intenta de nuevo en unos minutos.`);
       return;
     }
 
@@ -2723,16 +2774,12 @@ async function executeAgent(agent) {
       updateAgentCard(agent);
     }
 
-    // For render agents, generate via Pollinations.ai (free)
+    // For render agents, generate image via centralized provider
     if (isRender && agent.prompt) {
       try {
-        const encodedPrompt = encodeURIComponent(agent.prompt);
-        const pollUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now() + agent.id}`;
-        const resp = await fetch(pollUrl);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          const url = URL.createObjectURL(blob);
-          addRenderToGallery(url, agent.task);
+        const imgUrl = await generateImage(agent.prompt);
+        if (imgUrl) {
+          addRenderToGallery(imgUrl, agent.task);
           swarmLog(agent.name, `✅ Render generado: ${agent.task}`, 'ok');
         }
       } catch(e) { /* continue */ }
@@ -2884,16 +2931,9 @@ async function generateRender() {
   }, 5000);
 
   try {
-    // Generate via Pollinations.ai (free, no API key)
-    const encodedPrompt = encodeURIComponent(fullPrompt);
-    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
-
-    const resp = await fetch(pollinationsUrl);
-    if (!resp.ok) throw new Error('Error generando imagen');
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-
+    const url = await generateImage(fullPrompt);
     clearInterval(interval);
+    if (!url) throw new Error('Todos los proveedores de imagen fallaron');
     document.getElementById('render-loading').style.display = 'none';
     document.getElementById('render-actions').style.display = 'flex';
 
@@ -3015,12 +3055,8 @@ async function renderFloorPlan(key, btn) {
   try {
     const prompt = `Photorealistic luxury Caribbean architecture floor plan render. ${plan.label}. Convert this architectural floor plan into a stunning top-down 3D architectural visualization. Style: premium residential, warm tropical lighting, marble floors, lush greenery visible, swimming pool, premium Caribbean materials, professional architectural photography, 8K ultra-realistic.`;
 
-    const encodedPrompt = encodeURIComponent(prompt);
-    const pollUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
-    const resp = await fetch(pollUrl);
-    if (!resp.ok) throw new Error('No se pudo generar la imagen');
-    const blob = await resp.blob();
-    const imgUrl = URL.createObjectURL(blob);
+    const imgUrl = await generateImage(prompt);
+    if (!imgUrl) throw new Error('No se pudo generar la imagen');
 
     resultDiv.innerHTML = `
       <div style="font-size:12px;color:var(--gold);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px">✨ Render AI Generado</div>
@@ -3080,12 +3116,8 @@ async function renderUploadedPlan(src, btn) {
   
   try {
     const prompt = `Transform this architectural floor plan into a photorealistic luxury Caribbean property render. Top-down 3D view showing the actual layout with premium finishes, tropical landscaping, pools, marble floors. Professional architectural visualization. 8K ultra-realistic photography style.`;
-    const encodedPrompt = encodeURIComponent(prompt);
-    const pollUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
-    const resp = await fetch(pollUrl);
-    if (!resp.ok) throw new Error('No se pudo generar');
-    const blob = await resp.blob();
-    const imgUrl = URL.createObjectURL(blob);
+    const imgUrl = await generateImage(prompt);
+    if (!imgUrl) throw new Error('No se pudo generar');
     resultDiv.innerHTML = `
       <div style="font-size:12px;color:var(--gold);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.1em">✨ Render Generado</div>
       <img src="${imgUrl}" style="width:100%;border-radius:10px">
@@ -3284,23 +3316,36 @@ async function discoverFreeModels() {
     });
     if (!resp.ok) return;
     const data = await resp.json();
-    const freeModels = (data.data || [])
-      .filter(m => m.id && m.id.endsWith(':free'))
-      .sort((a, b) => (b.context_length || 0) - (a.context_length || 0))
-      .slice(0, 20);
+    const allFree = (data.data || []).filter(m => m.id && m.id.endsWith(':free'));
 
-    if (freeModels.length === 0) return;
+    if (allFree.length === 0) return;
 
-    state.freeModels = freeModels.map(m => m.id);
+    // Prioritize: large context, vision models first, then by params
+    const scored = allFree.map(m => {
+      let score = (m.context_length || 0) / 1000;
+      const idLower = (m.id + ' ' + (m.name || '')).toLowerCase();
+      // Boost vision models (can see images)
+      if (idLower.includes('vl') || idLower.includes('vision')) score += 500;
+      // Boost large/capable models
+      if (idLower.includes('405b') || idLower.includes('480b') || idLower.includes('coder')) score += 300;
+      if (idLower.includes('super') || idLower.includes('nemotron')) score += 200;
+      if (idLower.includes('70b') || idLower.includes('72b')) score += 100;
+      // Penalize tiny models
+      if (idLower.includes('1.2b') || idLower.includes('3b-instruct')) score -= 200;
+      return { ...m, score };
+    }).sort((a, b) => b.score - a.score).slice(0, 20);
 
-    // Update the dropdown
+    state.freeModels = scored.map(m => m.id);
+
+    // Update dropdown with scored order
     const select = document.getElementById('chat-model-select');
-    select.innerHTML = freeModels.map((m, i) => {
+    select.innerHTML = scored.map((m, i) => {
       const name = m.name || m.id.split('/')[1] || m.id;
-      return `<option value="${m.id}"${i === 0 ? ' selected' : ''}>${name}</option>`;
+      const badge = (m.id + ' ' + (m.name || '')).toLowerCase().includes('vl') ? ' 👁️' : '';
+      return `<option value="${m.id}"${i === 0 ? ' selected' : ''}>${name}${badge}</option>`;
     }).join('');
 
-    console.log('Discovered', freeModels.length, 'free models');
+    console.log('Discovered', scored.length, 'free models. Best:', scored[0]?.id);
   } catch(e) {
     console.log('Model discovery failed, using defaults');
   }
