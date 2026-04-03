@@ -1097,10 +1097,11 @@ function deleteProject(idx) {
         <div id="breadcrumb"></div>
       </div>
 
-      <!-- View mode toggle + nav -->
+      <!-- View mode toggle + camera -->
       <div style="position:absolute;top:16px;left:16px;z-index:25;display:flex;gap:6px">
-        <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:var(--gold);color:#fff;border:none">🖼️ Vista Plana</button>
-        <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🌐 Vista 360°</button>
+        <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:var(--gold);color:#fff;border:none">🖼️ Recorrido</button>
+        <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🌐 360°</button>
+        <button onclick="openCameraCapture()" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">📷 Capturar</button>
       </div>
 
       <!-- Minimap dots -->
@@ -1656,6 +1657,168 @@ function showTutorial() {
 function closeTutorial() {
   document.getElementById('tutorial-overlay').style.display = 'none';
   localStorage.setItem('cayenabot_tutorial_seen', 'true');
+}
+</script>
+
+<!-- CAMERA CAPTURE GUIDED MODE -->
+<div id="camera-modal" style="display:none;position:fixed;inset:0;z-index:50000;background:rgba(0,0,0,0.95);overflow-y:auto">
+  <div style="max-width:500px;margin:20px auto;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h2 style="color:#fff;margin:0;font-size:20px">📷 Captura Guiada de Fotos</h2>
+      <button onclick="closeCameraCapture()" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer">✕</button>
+    </div>
+
+    <!-- Step indicator -->
+    <div id="camera-step-indicator" style="display:flex;gap:4px;margin-bottom:16px"></div>
+
+    <!-- Current instruction -->
+    <div id="camera-instruction" style="background:rgba(196,119,59,0.1);border:1px solid rgba(196,119,59,0.3);border-radius:12px;padding:16px;margin-bottom:16px">
+      <div id="camera-step-title" style="color:var(--gold);font-size:16px;font-weight:700;margin-bottom:6px"></div>
+      <div id="camera-step-desc" style="color:var(--muted);font-size:13px;line-height:1.5"></div>
+      <div id="camera-step-tip" style="margin-top:8px;padding:8px;background:rgba(0,0,0,0.3);border-radius:8px;font-size:12px;color:var(--text)"></div>
+    </div>
+
+    <!-- Camera/Upload -->
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <button onclick="document.getElementById('camera-file-input').click()" style="flex:1;padding:14px;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer">
+        📷 Tomar Foto
+      </button>
+      <button onclick="document.getElementById('camera-upload-input').click()" style="flex:1;padding:14px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:14px;cursor:pointer">
+        📁 Subir Archivo
+      </button>
+      <input type="file" id="camera-file-input" accept="image/*" capture="environment" style="display:none" onchange="handleCameraPhoto(event)">
+      <input type="file" id="camera-upload-input" accept="image/*" style="display:none" onchange="handleCameraPhoto(event)">
+    </div>
+
+    <!-- Preview of captured photo -->
+    <div id="camera-preview" style="display:none;margin-bottom:16px;border-radius:12px;overflow:hidden;border:1px solid var(--border)">
+      <img id="camera-preview-img" style="width:100%;display:block">
+      <div style="padding:10px;display:flex;gap:8px">
+        <button onclick="acceptCameraPhoto()" style="flex:1;padding:10px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer">✅ Usar esta foto</button>
+        <button onclick="document.getElementById('camera-preview').style.display='none'" style="padding:10px;background:var(--card);color:var(--muted);border:1px solid var(--border);border-radius:8px;cursor:pointer">🔄 Otra</button>
+      </div>
+    </div>
+
+    <!-- Captured photos grid -->
+    <div id="camera-captured" style="margin-bottom:16px">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:8px" id="camera-count">0 fotos capturadas</div>
+      <div id="camera-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px"></div>
+    </div>
+
+    <!-- Actions -->
+    <div style="display:flex;gap:10px">
+      <button id="camera-skip-btn" onclick="nextCameraStep()" style="flex:1;padding:12px;background:var(--card);color:var(--muted);border:1px solid var(--border);border-radius:10px;font-size:13px;cursor:pointer">Saltar esta toma →</button>
+      <button onclick="finishCameraCapture()" style="flex:1;padding:12px;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">✅ Terminar y crear tour</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const CAMERA_GUIDE_STEPS = [
+  { title: '🏠 Fachada Principal', desc: 'Párate frente a la entrada principal del proyecto. Captura toda la fachada.', tip: '💡 Sostén el teléfono horizontal. Inclina ligeramente hacia arriba si el edificio es alto. Intenta que entre todo el frente.' },
+  { title: '🚪 Entrada / Lobby', desc: 'Entra al edificio. Captura el lobby o área de recepción desde la puerta.', tip: '💡 Captura desde la puerta mirando hacia adentro. Que se vean los acabados del piso y techo.' },
+  { title: '🛋️ Sala / Living', desc: 'Captura el área de estar principal. Párate en una esquina para capturar más espacio.', tip: '💡 Desde una esquina diagonal logras más amplitud. Asegúrate de que entre la ventana principal.' },
+  { title: '🍳 Cocina', desc: 'Captura la cocina mostrando la isla/mesón y electrodomésticos.', tip: '💡 Si es cocina abierta, captura donde se ve la conexión con el living. Muestra los acabados.' },
+  { title: '🛏️ Dormitorio Principal', desc: 'Captura desde la puerta del dormitorio, mirando hacia la ventana.', tip: '💡 Que se vea la cama, la ventana y la entrada al baño/closet si es visible.' },
+  { title: '🚿 Baño Principal', desc: 'Captura el baño mostrando la ducha/bañera y el vanity.', tip: '💡 Párate en la puerta y captura todo el baño. Los espejos ayudan a que se vea más amplio.' },
+  { title: '🏊 Piscina / Áreas Comunes', desc: 'Captura la piscina y áreas sociales desde el mejor ángulo.', tip: '💡 Busca el ángulo donde se vea la piscina completa + el edificio de fondo. Hora dorada = mejores fotos.' },
+  { title: '🌅 Vista / Terraza', desc: 'Captura la mejor vista desde la terraza o balcón.', tip: '💡 Si hay vista al mar o montaña, centra el horizonte en el tercio superior de la foto.' },
+  { title: '🏗️ Vista General / Aérea', desc: 'Captura una vista general del proyecto desde lejos o desde un punto alto.', tip: '💡 Si puedes subir al techo o a un punto alto, la vista aérea del complejo es muy valiosa.' },
+  { title: '📸 Fotos Extras', desc: 'Cualquier otra área importante: estacionamiento, jardines, gimnasio, etc.', tip: '💡 Toma todas las que quieras. Más fotos = mejor tour virtual.' }
+];
+
+let __cameraStep = 0;
+let __capturedPhotos = [];
+
+function openCameraCapture() {
+  __cameraStep = 0;
+  __capturedPhotos = [];
+  document.getElementById('camera-modal').style.display = '';
+  document.getElementById('camera-grid').innerHTML = '';
+  document.getElementById('camera-preview').style.display = 'none';
+  updateCameraStep();
+}
+
+function closeCameraCapture() {
+  document.getElementById('camera-modal').style.display = 'none';
+}
+
+function updateCameraStep() {
+  const step = CAMERA_GUIDE_STEPS[__cameraStep] || CAMERA_GUIDE_STEPS[CAMERA_GUIDE_STEPS.length - 1];
+
+  // Step indicator
+  document.getElementById('camera-step-indicator').innerHTML = CAMERA_GUIDE_STEPS.map((s, i) => {
+    const captured = __capturedPhotos[i];
+    const color = captured ? 'var(--gold)' : i === __cameraStep ? '#fff' : 'var(--muted)';
+    return `<div style="flex:1;height:4px;border-radius:2px;background:${color};opacity:${i <= __cameraStep ? 1 : 0.3}"></div>`;
+  }).join('');
+
+  document.getElementById('camera-step-title').textContent = `${__cameraStep + 1}/${CAMERA_GUIDE_STEPS.length} — ${step.title}`;
+  document.getElementById('camera-step-desc').textContent = step.desc;
+  document.getElementById('camera-step-tip').textContent = step.tip;
+  document.getElementById('camera-count').textContent = `${__capturedPhotos.filter(Boolean).length} fotos capturadas`;
+
+  // Show/hide skip
+  const skipBtn = document.getElementById('camera-skip-btn');
+  skipBtn.textContent = __cameraStep >= CAMERA_GUIDE_STEPS.length - 1 ? 'Tomar más fotos' : 'Saltar esta toma →';
+}
+
+function handleCameraPhoto(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById('camera-preview-img').src = e.target.result;
+    document.getElementById('camera-preview').style.display = '';
+    state.__pendingCameraPhoto = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function acceptCameraPhoto() {
+  const src = state.__pendingCameraPhoto;
+  if (!src) return;
+
+  const step = CAMERA_GUIDE_STEPS[__cameraStep] || { title: 'Foto Extra' };
+  __capturedPhotos[__cameraStep] = { src, label: step.title.replace(/^[^\s]+\s/, '') };
+
+  // Add to grid preview
+  const grid = document.getElementById('camera-grid');
+  grid.innerHTML += `<div style="position:relative;border-radius:6px;overflow:hidden;aspect-ratio:4/3">
+    <img src="${src}" style="width:100%;height:100%;object-fit:cover">
+    <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.8));color:#fff;font-size:9px;padding:6px 4px 3px;font-weight:600">${step.title.split(' ').slice(1).join(' ')}</div>
+  </div>`;
+
+  document.getElementById('camera-preview').style.display = 'none';
+  nextCameraStep();
+}
+
+function nextCameraStep() {
+  __cameraStep = Math.min(__cameraStep + 1, CAMERA_GUIDE_STEPS.length - 1);
+  updateCameraStep();
+}
+
+function finishCameraCapture() {
+  const photos = __capturedPhotos.filter(Boolean);
+  if (photos.length === 0) { showToast('⚠️ Toma al menos una foto'); return; }
+
+  closeCameraCapture();
+
+  // Add all photos to gallery and tour
+  photos.forEach(p => {
+    addRenderToGallery(p.src, p.label);
+    addToTour(p.src, p.label, { silent: true });
+  });
+
+  // Rebuild tour
+  setTimeout(() => {
+    __flatTourIdx = 0;
+    updateFlatTour();
+    switchTab('tour');
+  }, 300);
+
+  showToast(`📷 ${photos.length} fotos agregadas al tour virtual`);
 }
 </script>
 
@@ -4542,7 +4705,7 @@ function decomposeProjectTasks(projectInfo) {
   ];
   exteriorScenes.slice(0, maxExterior).forEach((s, i) => {
     tasks.push({ id: id++, type: 'render', name: `Render Ext ${i+1}`, task: s.task, taskFn: 'render',
-      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, equirectangular 360 degree panoramic photo, seamless panorama, photorealistic architectural render, ultra high quality, 8K, professional real estate photography, cinematic lighting, no text no watermark no logo` });
+      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, ultra wide angle lens 14mm, photorealistic architectural render, ultra high quality, 8K, professional real estate photography, cinematic lighting, dramatic composition, no text no watermark no logo` });
   });
 
   // Render agents — per unit type interiors (19-58)
@@ -4566,7 +4729,7 @@ function decomposeProjectTasks(projectInfo) {
   unitTypes.forEach(unit => {
     prioritizedScenes.forEach((s, i) => {
       tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,6)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
-        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, equirectangular 360 degree panoramic interior photo, seamless panorama, photorealistic render, ultra high quality, 8K, professional interior photography, cinematic warm lighting, no text no watermark no logo` });
+        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, ultra wide angle lens 14mm, photorealistic interior render, ultra high quality, 8K, professional interior photography, cinematic warm lighting, dramatic composition, no text no watermark no logo` });
     });
   });
 
