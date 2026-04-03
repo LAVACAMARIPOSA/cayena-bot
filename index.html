@@ -2591,7 +2591,61 @@ async function generateImage(prompt, opts = {}) {
       }
     }
 
-    // === FALLBACK 2: CORS proxy → Pollinations ===
+    // === FALLBACK 2: AI Horde (truly free, unlimited, crowdsourced GPUs) ===
+    try {
+      console.log('Trying AI Horde...');
+      const hordeSubmit = await fetch('https://aihorde.net/api/v2/generate/async', {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': '0000000000',
+          'Client-Agent': 'CayenaBot:1.0:cayenabot'
+        },
+        body: JSON.stringify({
+          prompt: `photorealistic architectural render, ${prompt}, high quality, professional photography, 8k`,
+          params: { width: 512, height: 512, steps: 25, sampler_name: 'k_euler_a', cfg_scale: 7, n: 1 },
+          models: ['Deliberate'],
+          nsfw: false,
+          r2: true
+        })
+      });
+      if (hordeSubmit.ok) {
+        const { id } = await hordeSubmit.json();
+        if (id) {
+          // Poll for completion (max ~90s for fast, ~180s otherwise)
+          const maxWait = fast ? 90000 : 180000;
+          const startTime = Date.now();
+          while (Date.now() - startTime < maxWait) {
+            await new Promise(r => setTimeout(r, 3000));
+            try {
+              const checkResp = await fetch(`https://aihorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
+              if (checkResp.ok) {
+                const status = await checkResp.json();
+                if (status.done) {
+                  const resultResp = await fetch(`https://aihorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(10000) });
+                  if (resultResp.ok) {
+                    const result = await resultResp.json();
+                    const imgUrl = result.generations?.[0]?.img;
+                    if (imgUrl) {
+                      console.log('AI Horde: ✅ image generated!');
+                      return imgUrl;
+                    }
+                  }
+                  break;
+                }
+                if (status.faulted) break;
+              }
+            } catch(e) { /* continue polling */ }
+          }
+          console.log('AI Horde: timeout or no result');
+        }
+      }
+    } catch(e) {
+      console.log('AI Horde error:', e.message);
+    }
+
+    // === FALLBACK 3: CORS proxy → Pollinations ===
     const seed = Date.now() + Math.floor(Math.random() * 10000);
     const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&model=flux&nologo=true&seed=${seed}`;
     const proxies = [
@@ -2607,7 +2661,7 @@ async function generateImage(prompt, opts = {}) {
       } catch(e) { /* next proxy */ }
     }
 
-    // === FALLBACK: Together.ai ===
+    // === FALLBACK 4: Together.ai ===
     const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
     if (togetherKey) {
       try {
@@ -3496,6 +3550,38 @@ async function diagRenders() {
       else if (result.url) url = result.url;
       else throw new Error('Formato desconocido: ' + typeof result + ' ' + JSON.stringify(result).slice(0,200));
       return { size: url.length, url };
+    }},
+    { name: 'AI Horde (GRATIS, ilimitado, sin API key)', fn: async (row) => {
+      row.innerHTML = `<span>⏳</span> <strong>AI Horde</strong>: enviando petición...`;
+      const submitResp = await fetch('https://aihorde.net/api/v2/generate/async', {
+        method: 'POST', signal: AbortSignal.timeout(10000),
+        headers: { 'Content-Type': 'application/json', 'apikey': '0000000000', 'Client-Agent': 'CayenaBot:1.0:cayenabot' },
+        body: JSON.stringify({ prompt: 'photorealistic modern house, ' + testPrompt, params: { width: 512, height: 512, steps: 20, sampler_name: 'k_euler_a', cfg_scale: 7, n: 1 }, models: ['Deliberate'], nsfw: false, r2: true })
+      });
+      if (!submitResp.ok) throw new Error(`HTTP ${submitResp.status}: ${await submitResp.text().catch(()=>'')}`);
+      const { id } = await submitResp.json();
+      if (!id) throw new Error('No job ID returned');
+      // Poll for completion
+      const maxWait = 120000;
+      const start = Date.now();
+      while (Date.now() - start < maxWait) {
+        await new Promise(r => setTimeout(r, 3000));
+        const elapsed = ((Date.now() - start) / 1000).toFixed(0);
+        row.innerHTML = `<span>⏳</span> <strong>AI Horde</strong>: esperando en cola... ${elapsed}s`;
+        const checkResp = await fetch(`https://aihorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
+        if (!checkResp.ok) continue;
+        const status = await checkResp.json();
+        if (status.done) {
+          const resultResp = await fetch(`https://aihorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(10000) });
+          if (!resultResp.ok) throw new Error(`Status HTTP ${resultResp.status}`);
+          const result = await resultResp.json();
+          const imgUrl = result.generations?.[0]?.img;
+          if (imgUrl) return { size: 0, url: imgUrl };
+          throw new Error('No image in result: ' + JSON.stringify(result).slice(0, 200));
+        }
+        if (status.faulted) throw new Error('Job faulted');
+      }
+      throw new Error('Timeout 120s — cola muy larga, intenta de nuevo');
     }},
     { name: 'Together.ai FLUX.1 (API)', fn: async (row) => {
       const togKey = document.getElementById('together-key-input')?.value?.trim() || state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
