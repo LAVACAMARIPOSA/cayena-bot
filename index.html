@@ -2899,6 +2899,8 @@ function addMsg(role, text) {
   d.innerHTML = `<div class="msg-bubble">${text.replace(/\n/g,'<br>')}</div>`;
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
+  // Auto-save after messages
+  if (typeof __autoSaveProject === 'function') __autoSaveProject();
   return d;
 }
 
@@ -3727,16 +3729,26 @@ async function executeAgent(agent) {
     // For render agents, generate image via centralized provider (fast mode)
     if (isRender && agent.prompt) {
       try {
-        const imgUrl = await generateImage(agent.prompt, { fast: true });
+        // Try up to 3 times with increasing wait
+        let imgUrl = null;
+        for (let retry = 0; retry < 3 && !imgUrl; retry++) {
+          if (retry > 0) {
+            swarmLog(agent.name, `🔄 Reintentando (${retry}/2)...`);
+            await new Promise(r => setTimeout(r, 2000 * retry));
+          }
+          imgUrl = await generateImage(agent.prompt, { fast: true });
+        }
         if (imgUrl) {
           agent.renderUrl = imgUrl;
           addRenderToGallery(imgUrl, agent.task);
           addToTour(imgUrl, agent.task, { silent: true });
           swarmLog(agent.name, `✅ Render generado + agregado al tour: ${agent.task}`, 'ok');
+          // Auto-save checkpoint after each successful render
+          __autoSaveProject();
         } else {
-          swarmLog(agent.name, `⚠️ Render no generado (sin provider disponible)`, 'err');
+          swarmLog(agent.name, `⚠️ Render fallido después de 3 intentos`, 'err');
         }
-      } catch(e) { /* continue */ }
+      } catch(e) { swarmLog(agent.name, `⚠️ Error: ${e.message}`, 'err'); }
     }
 
     agent.status = 'done';
@@ -4624,6 +4636,139 @@ function loadProject() {
   } catch(e) { return false; }
 }
 
+// =============================================
+// AUTO-SAVE SYSTEM (like ChatGPT conversations)
+// =============================================
+let __autoSaveTimer = null;
+let __lastSaveTime = 0;
+
+function __autoSaveProject() {
+  // Debounce: don't save more than once per 10 seconds
+  const now = Date.now();
+  if (now - __lastSaveTime < 10000) {
+    clearTimeout(__autoSaveTimer);
+    __autoSaveTimer = setTimeout(__autoSaveProject, 10000);
+    return;
+  }
+  __lastSaveTime = now;
+
+  try {
+    const saveData = {
+      name: state.projectName || document.getElementById('b-name')?.value?.trim() || '',
+      location: state.projectLocation || document.getElementById('b-location')?.value?.trim() || '',
+      locationContext: document.getElementById('b-location-context')?.value?.trim() || '',
+      description: document.getElementById('b-description')?.value?.trim() || '',
+      images: IMG,
+      scenes: SCENES,
+      units: typeof UNITS !== 'undefined' ? UNITS : [],
+      floorPlans: typeof FLOOR_PLANS !== 'undefined' ? FLOOR_PLANS : {},
+      chatHistory: state.chatHistory.slice(-100),
+      styleDNA: state.__styleDNA || '',
+      styleSeed: state.__styleSeed || '',
+      currentScene: state.currentScene || '',
+      savedAt: new Date().toISOString(),
+      version: 3
+    };
+    localStorage.setItem('cayenabot_project', JSON.stringify(saveData));
+
+    // Also save checkpoint with timestamp (keep last 3)
+    const checkpointKey = `cayenabot_checkpoint_${Date.now()}`;
+    localStorage.setItem(checkpointKey, JSON.stringify(saveData));
+
+    // Clean old checkpoints (keep last 3)
+    const allKeys = Object.keys(localStorage).filter(k => k.startsWith('cayenabot_checkpoint_')).sort();
+    while (allKeys.length > 3) {
+      localStorage.removeItem(allKeys.shift());
+    }
+
+    console.log('Auto-saved project:', Object.keys(IMG).length, 'images,', Object.keys(SCENES).length, 'scenes');
+  } catch(e) {
+    // localStorage might be full with base64 images
+    console.log('Auto-save failed:', e.message);
+    // Try saving without images (just metadata)
+    try {
+      const lightSave = {
+        name: state.projectName || '',
+        location: state.projectLocation || '',
+        chatHistory: state.chatHistory.slice(-50),
+        sceneCount: Object.keys(SCENES).length,
+        imageCount: Object.keys(IMG).length,
+        savedAt: new Date().toISOString(),
+        partial: true
+      };
+      localStorage.setItem('cayenabot_project_meta', JSON.stringify(lightSave));
+    } catch(e2) {}
+  }
+}
+
+function __loadAutoSave() {
+  try {
+    const saved = localStorage.getItem('cayenabot_project');
+    if (!saved) return false;
+    const p = JSON.parse(saved);
+    if (!p || (!p.images && !p.chatHistory)) return false;
+
+    if (p.images) Object.assign(IMG, p.images);
+    if (p.scenes) Object.assign(SCENES, p.scenes);
+    if (p.units && Array.isArray(p.units)) UNITS.push(...p.units);
+    if (p.floorPlans) Object.assign(FLOOR_PLANS, p.floorPlans);
+    state.projectName = p.name || '';
+    state.projectLocation = p.location || '';
+    if (p.styleDNA) state.__styleDNA = p.styleDNA;
+    if (p.styleSeed) state.__styleSeed = p.styleSeed;
+    if (p.chatHistory) state.chatHistory = p.chatHistory;
+
+    // Populate builder fields
+    const bName = document.getElementById('b-name');
+    const bLoc = document.getElementById('b-location');
+    const bLocCtx = document.getElementById('b-location-context');
+    const bDesc = document.getElementById('b-description');
+    if (bName && p.name) bName.value = p.name;
+    if (bLoc && p.location) bLoc.value = p.location;
+    if (bLocCtx && p.locationContext) bLocCtx.value = p.locationContext;
+    if (bDesc && p.description) bDesc.value = p.description;
+
+    // Restore chat messages
+    if (p.chatHistory && p.chatHistory.length > 0) {
+      const chatEl = document.getElementById('chat-messages');
+      if (chatEl) {
+        chatEl.innerHTML = p.chatHistory.map(m =>
+          `<div class="msg msg-${m.role}"><div class="msg-bubble">${m.content}</div></div>`
+        ).join('');
+      }
+    }
+
+    // Set first scene
+    const first = p.currentScene || Object.keys(SCENES)[0];
+    if (first && SCENES[first]) state.currentScene = first;
+
+    buildGallery();
+    if (typeof buildUnits === 'function') buildUnits();
+    updateMinimap();
+    if (typeof buildFloorPlans === 'function') buildFloorPlans();
+
+    const imgCount = Object.keys(IMG).length;
+    const sceneCount = Object.keys(SCENES).length;
+    if (imgCount > 0 || sceneCount > 0) {
+      showToast(`📂 Proyecto restaurado: ${p.name || 'Sin nombre'} — ${imgCount} imágenes, ${sceneCount} escenas`);
+    }
+    return true;
+  } catch(e) {
+    console.log('Load auto-save failed:', e.message);
+    return false;
+  }
+}
+
+// Auto-save triggers: after chat message, after render, after settings change
+function __setupAutoSave() {
+  // Save every 30 seconds if there are changes
+  setInterval(() => {
+    if (Object.keys(IMG).length > 0 || state.chatHistory.length > 0) {
+      __autoSaveProject();
+    }
+  }, 30000);
+}
+
 function exportProject() {
   const project = {
     name: state.projectName || document.getElementById('b-name')?.value?.trim() || 'Mi Proyecto',
@@ -4834,6 +4979,10 @@ function init() {
   const savedSdUrl = localStorage.getItem('cayenabot_local_sd_url');
   if (savedSdUrl) state.localSdUrl = savedSdUrl;
   
+  // Load auto-saved project (like ChatGPT restoring conversations)
+  __loadAutoSave();
+  __setupAutoSave();
+
   // Init tour UI
   updateTourUI();
   // Init Three.js tour engine
