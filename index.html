@@ -2409,115 +2409,63 @@ function removeEl(el) {
 }
 
 // =============================================
-// CENTRALIZED IMAGE GENERATION (multi-provider fallback)
+// CENTRALIZED IMAGE GENERATION (Pollinations + retry for 429)
 // =============================================
 let __imgGenActive = 0;
-const __IMG_MAX_CONCURRENT = 3;
-let __workingProvider = null; // cache which provider works to skip slow discovery
+const __IMG_MAX_CONCURRENT = 2; // low concurrency to avoid Pollinations 429
+let __lastPollRequest = 0; // rate limit tracker
 
 async function generateImage(prompt, opts = {}) {
   const fast = opts.fast || false;
-  const getHfKey = () => state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
 
   // Concurrency gate
   while (__imgGenActive >= __IMG_MAX_CONCURRENT) {
-    await new Promise(r => setTimeout(r, 300 + Math.random() * 400));
+    await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
   }
   __imgGenActive++;
 
-  // HuggingFace helper
-  const hfImg = (id, model, params={}) => ({ id, fn: async () => {
-    const k = getHfKey(); if (!k) throw new Error('No HF key');
-    const r = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
-      method: 'POST', signal: AbortSignal.timeout(fast ? 30000 : 90000),
-      headers: { 'Authorization': `Bearer ${k.trim()}`, 'Content-Type': 'application/json', 'x-wait-for-model': fast ? 'false' : 'true' },
-      body: JSON.stringify({ inputs: prompt, parameters: { width: 1024, height: 576, ...params } })
-    });
-    if (r.status === 503) throw new Error(`HF ${model.split('/')[1]} loading`);
-    if (!r.ok) throw new Error(`HF ${model.split('/')[1]} ${r.status}`);
-    const blob = await r.blob();
-    if (blob.size < 500) throw new Error('HF empty');
-    return URL.createObjectURL(blob);
-  }});
-
-  const pollinationsImg = (id, model, w, h) => ({ id, fn: async () => {
-    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${model}&nologo=true&seed=${Date.now()}`;
-    const r = await fetch(url, { signal: AbortSignal.timeout(fast ? 15000 : 45000) });
-    if (!r.ok) throw new Error('Pollinations ' + r.status);
-    const blob = await r.blob();
-    if (blob.size < 500) throw new Error('Pollinations empty');
-    return URL.createObjectURL(blob);
-  }});
-
-  const allProviders = [
-    hfImg('hf-flux-schnell', 'black-forest-labs/FLUX.1-schnell', { num_inference_steps: 4, guidance_scale: 0 }),
-    hfImg('hf-sdxl-lightning', 'ByteDance/SDXL-Lightning', { num_inference_steps: 4 }),
-    pollinationsImg('poll-flux', 'flux', 1280, 720),
-    pollinationsImg('poll-turbo', 'turbo', 1024, 576),
-    hfImg('hf-flux-dev', 'black-forest-labs/FLUX.1-dev', { num_inference_steps: 20 }),
-    hfImg('hf-sdxl-base', 'stabilityai/stable-diffusion-xl-base-1.0', { num_inference_steps: 25, guidance_scale: 7.5 })
-  ];
-
-  // If we know a working provider, try it first
-  let providers;
-  if (__workingProvider) {
-    const cached = allProviders.find(p => p.id === __workingProvider);
-    if (cached) {
-      providers = [cached, ...allProviders.filter(p => p.id !== __workingProvider)];
-    } else {
-      providers = allProviders;
-    }
-  } else {
-    providers = allProviders;
-  }
-
-  // In fast mode, only try first 4 providers max
-  if (fast) providers = providers.slice(0, 4);
-
-  const errors = [];
   try {
-    for (const { id, fn } of providers) {
-      try {
-        const result = await fn();
-        if (result) {
-          __workingProvider = id; // cache working provider
-          return result;
+    // Rate limit: ensure minimum gap between Pollinations requests
+    const minGap = fast ? 2000 : 1500;
+    const elapsed = Date.now() - __lastPollRequest;
+    if (elapsed < minGap) {
+      await new Promise(r => setTimeout(r, minGap - elapsed + Math.random() * 500));
+    }
+
+    // Try Pollinations with exponential backoff on 429
+    const models = ['flux', 'turbo'];
+    for (const model of models) {
+      const maxRetries = fast ? 3 : 5;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          __lastPollRequest = Date.now();
+          const seed = Date.now() + attempt;
+          const w = model === 'flux' ? 1280 : 1024;
+          const h = model === 'flux' ? 720 : 576;
+          const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${model}&nologo=true&seed=${seed}`;
+          const r = await fetch(url, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
+
+          if (r.status === 429) {
+            // Rate limited — wait with exponential backoff then retry
+            const wait = (2000 * Math.pow(2, attempt)) + Math.random() * 1000;
+            console.log(`Pollinations 429 (${model}), retry ${attempt+1} in ${(wait/1000).toFixed(1)}s`);
+            await new Promise(r => setTimeout(r, wait));
+            continue;
+          }
+          if (!r.ok) throw new Error(`Pollinations ${model} HTTP ${r.status}`);
+
+          const blob = await r.blob();
+          if (blob.size < 500) throw new Error(`Pollinations ${model} empty (${blob.size}b)`);
+          return URL.createObjectURL(blob);
+        } catch(e) {
+          if (e.message.includes('429')) continue; // retry on rate limit
+          console.log(`Pollinations ${model} error:`, e.message);
+          break; // non-429 error, try next model
         }
-      } catch(e) {
-        errors.push(id + ': ' + e.message);
-        console.log('ImgGen failed:', id, e.message);
       }
     }
 
-    // Last resort for non-fast mode: Stable Horde (anonymous, slow)
-    if (!fast) {
-      try {
-        const sub = await fetch('https://stablehorde.net/api/v2/generate/async', {
-          method: 'POST', signal: AbortSignal.timeout(15000),
-          headers: { 'Content-Type': 'application/json', 'apikey': '0000000000' },
-          body: JSON.stringify({ prompt, params: { width: 512, height: 512, steps: 20, sampler_name: 'k_euler', karras: true, n: 1 }, models: ['stable_diffusion_xl'] })
-        });
-        if (sub.ok) {
-          const { id } = await sub.json();
-          if (id) {
-            for (let i = 0; i < 40; i++) {
-              await new Promise(r => setTimeout(r, 4000));
-              const check = await fetch(`https://stablehorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
-              const c = await check.json();
-              if (c.done) {
-                const st = await fetch(`https://stablehorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(5000) });
-                const s = await st.json();
-                const b64 = s.generations?.[0]?.img;
-                if (b64) return `data:image/webp;base64,${b64}`;
-              }
-              if (c.faulted) break;
-            }
-          }
-        }
-      } catch(e) { errors.push('horde: ' + e.message); }
-    }
-
-    console.error('All image providers failed:', errors);
+    console.error('All image providers failed for prompt:', prompt.slice(0, 80));
     return null;
   } finally {
     __imgGenActive--;
@@ -2654,12 +2602,7 @@ async function generateRenderFromChat(prompt, label) {
 
     if (!imgSrc) {
       removeEl(statusMsg);
-      const hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || '';
-      if (!hfKey) {
-        addMsg('assistant', `⚠️ <strong>Render fallido.</strong> Agrega tu <strong>HuggingFace token gratis</strong> en ⚙️ Configuración para activar FLUX.1 y SDXL-Lightning.<br><a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--blue)">→ Obtener token gratis en hf.co</a> (requiere cuenta gratuita)`);
-      } else {
-        addMsg('assistant', `⚠️ <strong>Render fallido.</strong> Todos los proveedores están ocupados. El sistema intentó HF FLUX.1, SDXL-Lightning, Pollinations y Stable Horde. Intenta de nuevo en un momento.`);
-      }
+      addMsg('assistant', `⚠️ <strong>Render fallido</strong> — Pollinations.ai está con rate limit (429). Espera unos segundos e intenta de nuevo. Los renders se generan de a uno para no saturar el servicio gratuito.`);
       return;
     }
 
@@ -3004,19 +2947,32 @@ async function runSwarm(projectInfo) {
   }, 100);
 
   swarmLog('Coordinator', '🚀 Inicializando Ruflo Swarm con ' + tasks.length + ' agentes...');
-  swarmLog('Coordinator', '📡 Topología: mesh adaptiva — ejecución paralela máxima');
-  const hfCheck = state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
-  if (!hfCheck) {
-    swarmLog('Coordinator', '⚠️ Sin HuggingFace key — renders usarán Pollinations (más lento). Para renders con FLUX.1: ⚙️ Config → pegar HF token gratis', 'err');
-    addMsg('assistant', '⚠️ <strong>Tip:</strong> Los renders del Swarm serán más rápidos con un token HuggingFace gratuito. Ve a ⚙️ Configuración → HuggingFace key → <a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--blue)">obtener token gratis</a>');
+  swarmLog('Coordinator', '📡 Renders via Pollinations.ai FLUX — rate-limit aware, backoff automático');
+
+  // Separate render and non-render agents
+  const renderAgents = swarmState.agents.filter(a => a.taskFn === 'render');
+  const otherAgents = swarmState.agents.filter(a => a.taskFn !== 'render');
+
+  // Phase 1: Run all non-render agents fast (batches of 15)
+  swarmLog('Coordinator', `⚡ Fase 1: ${otherAgents.length} agentes no-render (rápido)`);
+  for (let i = 0; i < otherAgents.length; i += 15) {
+    const batch = otherAgents.slice(i, i + 15);
+    await Promise.allSettled(batch.map(agent => executeAgent(agent)));
   }
 
-  // Execute in parallel batches (smaller if no HF key to avoid overwhelming free APIs)
-  const BATCH_SIZE = hfCheck ? 15 : 8;
-  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-    const batch = swarmState.agents.slice(i, i + BATCH_SIZE);
-    swarmLog('Coordinator', `⚡ Lanzando batch ${Math.floor(i/BATCH_SIZE)+1}/${Math.ceil(tasks.length/BATCH_SIZE)} (${batch.length} agentes)`);
+  // Phase 2: Run render agents in small batches with delays to respect rate limits
+  swarmLog('Coordinator', `🎨 Fase 2: ${renderAgents.length} renders (2 simultáneos, backoff para rate limits)`);
+  const RENDER_BATCH = 2; // only 2 concurrent renders to avoid 429
+  for (let i = 0; i < renderAgents.length; i += RENDER_BATCH) {
+    const batch = renderAgents.slice(i, i + RENDER_BATCH);
+    const batchNum = Math.floor(i/RENDER_BATCH)+1;
+    const totalBatches = Math.ceil(renderAgents.length/RENDER_BATCH);
+    swarmLog('Coordinator', `🎨 Render batch ${batchNum}/${totalBatches}`);
     await Promise.allSettled(batch.map(agent => executeAgent(agent)));
+    // Pause between render batches to avoid 429
+    if (i + RENDER_BATCH < renderAgents.length) {
+      await new Promise(r => setTimeout(r, 1500 + Math.random() * 1000));
+    }
   }
 
   // Done
