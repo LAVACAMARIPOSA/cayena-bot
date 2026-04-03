@@ -1058,20 +1058,23 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div id="settings-box">
     <h2>⚙️ Configuración</h2>
     <div style="font-size:12px;color:var(--muted);margin-bottom:16px;padding:12px;background:rgba(0,204,102,0.08);border-radius:8px;border:1px solid rgba(0,204,102,0.2)">
-      ✅ <strong>Chat AI activo</strong> — OpenRouter con modelos 100% gratuitos<br>
-      ✅ <strong>Renders AI activos</strong> — Pollinations.ai + FLUX (gratis, ilimitado)
+      ✅ <strong>Chat AI</strong> — OpenRouter (modelos gratuitos, $0 gasto)<br>
+      ✅ <strong>Renders</strong> — Pollinations.ai + FLUX (gratis, ilimitado)<br>
+      <span style="font-size:11px">Las keys vienen preconfiguradas. Puedes cambiarlas si tienes las tuyas.</span>
     </div>
     <div class="settings-field">
-      <label>Modelo de Chat</label>
-      <div style="font-size:13px;color:var(--text);padding:8px 0">Todos los modelos son gratuitos. Selecciona en el dropdown del chat.</div>
+      <label>OpenRouter API Key</label>
+      <input type="password" id="or-key-input" placeholder="sk-or-v1-...">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Solo modelos <strong>:free</strong> — tu saldo nunca se consume. <a href="https://openrouter.ai/settings/keys" target="_blank" style="color:var(--blue)">Obtener key gratis</a></div>
       <div class="settings-status" id="or-status"></div>
     </div>
-    <div class="settings-field" style="display:none">
-      <input type="hidden" id="or-key-input" value="">
-      <input type="hidden" id="hf-key-input" value="">
+    <div class="settings-field">
+      <label>HuggingFace API Key <span style="color:var(--muted);font-weight:400">(opcional — renders extra)</span></label>
+      <input type="password" id="hf-key-input" placeholder="hf_...">
       <div class="settings-status" id="hf-status"></div>
     </div>
     <button id="settings-test-btn" onclick="testConnections()">🔗 Probar Conexión</button>
+    <button id="settings-save-btn" onclick="saveSettings()">💾 Guardar</button>
     <button id="settings-close-btn" onclick="closeSettings()">Cerrar</button>
   </div>
 </div>
@@ -2200,7 +2203,11 @@ async function sendChat() {
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       const errMsg = err?.error?.message || `Error ${resp.status}`;
-      addMsg('assistant', `⚠️ ${errMsg}`);
+      if (resp.status === 401 || resp.status === 403 || errMsg.includes('not found') || errMsg.includes('invalid') || errMsg.includes('auth')) {
+        addMsg('assistant', `⚠️ <strong>Error de autenticación:</strong> ${errMsg}<br><br>Tu API key puede estar expirada. Ve a ⚙️ <strong>Configuración</strong> para actualizarla.<br><a href="https://openrouter.ai/settings/keys" target="_blank" style="color:var(--blue)">→ Obtener nueva key en OpenRouter</a>`);
+      } else {
+        addMsg('assistant', `⚠️ ${errMsg}`);
+      }
       return;
     }
 
@@ -2767,18 +2774,26 @@ function downloadRender() {
 // SETTINGS
 // =============================================
 function openSettings() {
+  document.getElementById('or-key-input').value = state.orKey || '';
+  document.getElementById('hf-key-input').value = state.hfKey || '';
   document.getElementById('or-status').innerHTML = '';
+  document.getElementById('hf-status').innerHTML = '';
   document.getElementById('settings-modal').classList.add('open');
 }
 function closeSettings() {
   document.getElementById('settings-modal').classList.remove('open');
 }
 function saveSettings() {
+  const orVal = document.getElementById('or-key-input').value.trim();
+  const hfVal = document.getElementById('hf-key-input').value.trim();
+  if (orVal) { state.orKey = orVal; localStorage.setItem('cayenabot_or_key', orVal); }
+  if (hfVal) { state.hfKey = hfVal; localStorage.setItem('cayenabot_hf_key', hfVal); }
   closeSettings();
+  showToast('✅ Configuración guardada');
 }
 
 async function testConnections() {
-  const orKey = state.orKey;
+  const orKey = document.getElementById('or-key-input').value.trim() || state.orKey;
 
   // Test OpenRouter
   if (orKey) {
@@ -3107,11 +3122,12 @@ async function extractZip(file) {
 // INIT
 // =============================================
 function init() {
-  // API key hardcoded in state — load optional HF key from localStorage
-  const savedHf = localStorage.getItem('hf_key');
+  // Load API keys: localStorage overrides hardcoded defaults
+  const savedOr = localStorage.getItem('cayenabot_or_key');
+  const savedHf = localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key');
+  if (savedOr) state.orKey = savedOr;
+  // orKey already has a default hardcoded in state
   if (savedHf) state.hfKey = savedHf;
-  
-  // API key already hardcoded — no setup needed
   
   // Init tour UI
   updateTourUI();
