@@ -1204,8 +1204,38 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button onclick="closeStyleWizard()" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer">✕</button>
     </div>
 
-    <!-- Step 1: Architecture Style -->
+    <!-- Step 0: Location & Context -->
     <div class="sw-section">
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">📍 Ubicación del Proyecto <span style="color:var(--muted);font-weight:400;font-size:12px">(recomendado)</span></h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">Ubicación</label>
+          <input id="sw-location" type="text" placeholder="Ej: Playa Encuentro, Cabarete" style="width:100%;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:13px" value="">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">Nombre del Proyecto</label>
+          <input id="sw-project-name" type="text" placeholder="Ej: Coral Bay Residences" style="width:100%;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:13px" value="">
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">Describe el entorno real <span style="color:var(--gold)">(esto afecta la vegetación, fondos y ambiente de TODOS los renders)</span></label>
+        <textarea id="sw-location-context" placeholder="Ej: Zona residencial a 500m de la playa, terreno elevado con vegetación tropical densa, NO es primera línea de playa. Vista parcial al mar desde pisos altos. Rodeado de palmeras y vegetación caribeña." style="width:100%;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:12px;min-height:60px;resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button onclick="wizardAutoDetect()" style="background:var(--card);color:var(--gold);border:1px solid var(--gold);border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;font-weight:600">📍 Auto-detectar con Google Maps</button>
+        <label style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;font-weight:500">
+          🗺️ Subir captura de mapa/ubicación
+          <input type="file" accept="image/*" style="display:none" onchange="wizardUploadMap(event)">
+        </label>
+        <div id="sw-location-status" style="font-size:11px;color:var(--muted);display:flex;align-items:center"></div>
+      </div>
+      <div id="sw-map-preview" style="margin-top:8px;display:none">
+        <img id="sw-map-img" style="max-width:100%;max-height:150px;border-radius:8px;border:1px solid var(--border)">
+      </div>
+    </div>
+
+    <!-- Step 1: Architecture Style -->
+    <div class="sw-section" style="margin-top:24px">
       <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">1. Estilo Arquitectónico</h3>
       <div class="sw-grid" id="sw-arch-grid"></div>
     </div>
@@ -3882,10 +3912,48 @@ const STYLE_OPTIONS = {
 
 let __wizardSelection = { architecture: null, interior: null, palette: null, lighting: null };
 
+function wizardAutoDetect() {
+  const loc = document.getElementById('sw-location')?.value?.trim();
+  if (!loc) { document.getElementById('sw-location-status').innerHTML = '<span style="color:#e05">Escribe la ubicación primero</span>'; return; }
+  // Copy to builder fields and use existing autoDetectLocation
+  const bLoc = document.getElementById('b-location');
+  if (bLoc) bLoc.value = loc;
+  const bCtx = document.getElementById('b-location-context');
+  // Redirect the autoDetect to write to wizard field instead
+  const origCtx = document.getElementById('b-location-context');
+  const wizCtx = document.getElementById('sw-location-context');
+  document.getElementById('sw-location-status').innerHTML = '⏳ Buscando...';
+  // Use AI to describe the location
+  aiDescribeLocation(loc, wizCtx, document.getElementById('sw-location-status'));
+}
+
+function wizardUploadMap(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const preview = document.getElementById('sw-map-preview');
+    const img = document.getElementById('sw-map-img');
+    img.src = ev.target.result;
+    preview.style.display = '';
+    state.__mapImage = ev.target.result;
+    document.getElementById('sw-location-status').innerHTML = '<span style="color:#0c6">✅ Mapa subido — se usará como referencia de ubicación</span>';
+  };
+  reader.readAsDataURL(file);
+}
+
 function openStyleWizard() {
   __wizardSelection = { architecture: null, interior: null, palette: null, lighting: null };
   const wiz = document.getElementById('style-wizard');
   wiz.style.display = '';
+
+  // Pre-fill from builder fields
+  const bName = document.getElementById('b-name')?.value?.trim();
+  const bLoc = document.getElementById('b-location')?.value?.trim();
+  const bCtx = document.getElementById('b-location-context')?.value?.trim();
+  if (bName) document.getElementById('sw-project-name').value = bName;
+  if (bLoc) document.getElementById('sw-location').value = bLoc;
+  if (bCtx) document.getElementById('sw-location-context').value = bCtx;
 
   // Render architecture cards
   document.getElementById('sw-arch-grid').innerHTML = STYLE_OPTIONS.architecture.map(s =>
@@ -3984,13 +4052,26 @@ function getStylePromptDNA() {
 }
 
 function launchSwarmWithStyle() {
+  // Copy wizard fields to builder/state
+  const wizName = document.getElementById('sw-project-name')?.value?.trim();
+  const wizLoc = document.getElementById('sw-location')?.value?.trim();
+  const wizCtx = document.getElementById('sw-location-context')?.value?.trim();
+  if (wizName) { state.projectName = wizName; const el = document.getElementById('b-name'); if (el) el.value = wizName; }
+  if (wizLoc) { state.projectLocation = wizLoc; const el = document.getElementById('b-location'); if (el) el.value = wizLoc; }
+  if (wizCtx) { const el = document.getElementById('b-location-context'); if (el) el.value = wizCtx; }
+
   closeStyleWizard();
-  // Store the style DNA for use in render prompts
   state.__styleDNA = getStylePromptDNA();
-  // Launch swarm
+  // Add location context to style DNA for environment accuracy
+  if (wizCtx) state.__styleDNA += `, ENVIRONMENT: ${wizCtx}`;
+
   const projectInfo = parseProjectFromChat();
+  if (!projectInfo.name && wizName) projectInfo.name = wizName;
   if (!projectInfo.name) projectInfo.name = 'Mi Proyecto';
-  addMsg('assistant', `🚀 <strong>Activando Ruflo Swarm Engine</strong><br>Estilo: <strong>${getStylePromptDNA().slice(0, 100)}...</strong><br>Desplegando agentes para: <strong>${projectInfo.name}</strong>`);
+  if (!projectInfo.location && wizLoc) projectInfo.location = wizLoc;
+  if (!projectInfo.locationContext && wizCtx) projectInfo.locationContext = wizCtx;
+
+  addMsg('assistant', `🚀 <strong>Activando Ruflo Swarm Engine</strong><br>📍 ${projectInfo.location || 'Sin ubicación'}<br>🎨 ${getStylePromptDNA().slice(0, 80)}...<br>Desplegando agentes para: <strong>${projectInfo.name}</strong>`);
   setTimeout(() => runSwarm(projectInfo), 500);
 }
 
