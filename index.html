@@ -2417,7 +2417,7 @@ function removeEl(el) {
 
 // =============================================
 // CENTRALIZED IMAGE GENERATION
-// Together.ai PRIMARY → Pollinations fallback
+// CORS proxy for Pollinations (bypasses network blocks)
 // =============================================
 let __imgGenActive = 0;
 const __IMG_MAX_CONCURRENT = 3;
@@ -2432,7 +2432,36 @@ async function generateImage(prompt, opts = {}) {
   __imgGenActive++;
 
   try {
-    // === PRIMARY: Together.ai FLUX.1-schnell-Free (fast, reliable, FREE model) ===
+    // Build Pollinations URL
+    const seed = Date.now() + Math.floor(Math.random() * 10000);
+    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&model=flux&nologo=true&seed=${seed}`;
+
+    // === METHOD 1: Pollinations via CORS proxies (free, bypasses blocks) ===
+    const proxies = [
+      (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+      (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+      (url) => url  // direct (may work in some environments)
+    ];
+
+    for (let i = 0; i < proxies.length; i++) {
+      try {
+        const proxiedUrl = proxies[i](pollUrl);
+        const r = await fetch(proxiedUrl, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
+        if (r.status === 429) {
+          // Rate limited — wait and retry with next proxy
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        if (blob.size < 1000 || !blob.type.startsWith('image')) throw new Error('Not image (' + blob.size + 'b ' + blob.type + ')');
+        return URL.createObjectURL(blob);
+      } catch(e) {
+        console.log(`Proxy ${i} failed:`, e.message);
+      }
+    }
+
+    // === METHOD 2: Together.ai (if key available) ===
     const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
     if (togetherKey) {
       try {
@@ -2445,17 +2474,12 @@ async function generateImage(prompt, opts = {}) {
           const d = await r.json();
           const b64 = d.data?.[0]?.b64_json;
           if (b64) return `data:image/png;base64,${b64}`;
-        } else {
-          const errText = await r.text().catch(() => '');
-          console.log('Together.ai error:', r.status, errText.slice(0, 200));
         }
       } catch(e) { console.log('Together.ai:', e.message); }
     }
 
-    // === FALLBACK 1: Pollinations via <img> tag ===
+    // === METHOD 3: Pollinations via <img> tag (last resort) ===
     try {
-      const seed = Date.now() + Math.floor(Math.random() * 10000);
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=flux&nologo=true&seed=${seed}`;
       const result = await new Promise((resolve, reject) => {
         const img = new Image();
         img.crossOrigin = 'anonymous';
@@ -2467,23 +2491,13 @@ async function generateImage(prompt, opts = {}) {
             c.width = img.naturalWidth; c.height = img.naturalHeight;
             c.getContext('2d').drawImage(img, 0, 0);
             resolve(c.toDataURL('image/jpeg', 0.85));
-          } catch(e) { resolve(url); }
+          } catch(e) { resolve(pollUrl); }
         };
         img.onerror = () => { clearTimeout(tmout); reject(new Error('blocked')); };
-        img.src = url;
+        img.src = pollUrl;
       });
       if (result) return result;
     } catch(e) { console.log('Pollinations img:', e.message); }
-
-    // === FALLBACK 2: Pollinations fetch ===
-    try {
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=turbo&nologo=true&seed=${Date.now()}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      if (r.ok) {
-        const blob = await r.blob();
-        if (blob.size > 500) return URL.createObjectURL(blob);
-      }
-    } catch(e) { console.log('Pollinations fetch:', e.message); }
 
     return null;
   } finally {
@@ -3238,7 +3252,29 @@ async function diagRenders() {
   }
 
   const tests = [
+    { name: 'Pollinations via CORS proxy (corsproxy.io)', fn: async (row) => {
+      const seed = Date.now();
+      const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=flux&nologo=true&seed=${seed}`;
+      const proxiedUrl = `https://corsproxy.io/?url=${encodeURIComponent(pollUrl)}`;
+      const r = await fetch(proxiedUrl, { signal: AbortSignal.timeout(60000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      if (blob.size < 1000 || !blob.type.startsWith('image')) throw new Error('No imagen (' + blob.size + 'b, ' + blob.type + ')');
+      return { size: blob.size, url: URL.createObjectURL(blob) };
+    }},
+    { name: 'Pollinations via proxy (codetabs)', fn: async (row) => {
+      await new Promise(r => setTimeout(r, 2000));
+      const seed = Date.now();
+      const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=flux&nologo=true&seed=${seed}`;
+      const proxiedUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(pollUrl)}`;
+      const r = await fetch(proxiedUrl, { signal: AbortSignal.timeout(60000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      if (blob.size < 1000) throw new Error('No imagen (' + blob.size + 'b)');
+      return { size: blob.size, url: URL.createObjectURL(blob) };
+    }},
     { name: 'Pollinations FLUX (img tag)', fn: async (row) => {
+      await new Promise(r => setTimeout(r, 2000));
       const seed = Date.now();
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=flux&nologo=true&seed=${seed}`;
       return new Promise((resolve, reject) => {
