@@ -2391,6 +2391,31 @@ function removeEl(el) {
 // =============================================
 async function generateImage(prompt) {
   const providers = [
+    // 0. OpenRouter — Gemini 2.0 Flash image generation (same API already working for chat)
+    async () => {
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST', signal: AbortSignal.timeout(60000),
+        headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+        body: JSON.stringify({
+          model: 'google/gemini-2.0-flash-exp:free',
+          modalities: ['image', 'text'],
+          messages: [{ role: 'user', content: `Generate a photorealistic architectural render image: ${prompt}` }]
+        })
+      });
+      if (!resp.ok) throw new Error('OR-Gemini ' + resp.status);
+      const d = await resp.json();
+      // Gemini returns image in content parts
+      const parts = d.choices?.[0]?.message?.content;
+      if (Array.isArray(parts)) {
+        const imgPart = parts.find(p => p.type === 'image_url' || p.inline_data);
+        if (imgPart?.image_url?.url) return imgPart.image_url.url;
+        if (imgPart?.inline_data?.data) return `data:${imgPart.inline_data.mime_type || 'image/png'};base64,${imgPart.inline_data.data}`;
+      }
+      // Also check top-level images array (some OpenRouter responses)
+      const img = d.choices?.[0]?.message?.images?.[0];
+      if (img) return img.url || img.image_url?.url || `data:image/png;base64,${img}`;
+      throw new Error('No image in Gemini response');
+    },
     // 1. Pollinations.ai (free, no key)
     async () => {
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
@@ -3247,15 +3272,9 @@ function handleFileUpload(files) {
     } else if (ext === 'zip') {
       processZipUpload(file);
     } else if (ext === 'pdf') {
-      addMsg('assistant', '📄 <strong>' + file.name + '</strong> recibido. Generando render de: "' + name + '"');
-      const geo = detectGeoContext(state.projectLocation);
-      const built = buildEnhancedPrompt('fachada', geo, 0, state.projectName, name);
-      renderQueue.push({ prompt: built.prompt, label: name }); processRenderQueue();
+      addMsg('assistant', '📄 <strong>' + file.name + '</strong> recibido. ¿Qué quieres que haga con este archivo? Puedes pedirme renders, análisis de planos, estimación de precios, etc.');
     } else if (['dwg','dxf','skp','fbx','obj','gltf','glb','3ds','stl','rvt'].includes(ext)) {
-      addMsg('assistant', '📁 <strong>' + file.name + '</strong> (' + ext.toUpperCase() + ') recibido. Generando render hiperrealista del espacio...');
-      const geo = detectGeoContext(state.projectLocation);
-      const built = buildEnhancedPrompt('living', geo, 0, state.projectName, name);
-      renderQueue.push({ prompt: built.prompt, label: name }); processRenderQueue();
+      addMsg('assistant', '📁 <strong>' + file.name + '</strong> (' + ext.toUpperCase() + ') recibido. ¿Qué quieres que haga? Puedo generar renders hiperrealistas, analizar el espacio, o crear un tour virtual basado en este plano.');
     } else {
       addMsg('assistant', '📎 <strong>' + file.name + '</strong> recibido (formato ' + ext.toUpperCase() + ').');
     }
