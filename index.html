@@ -1193,6 +1193,77 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- STYLE WIZARD MODAL -->
+<div id="style-wizard" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.85);overflow-y:auto;backdrop-filter:blur(8px)">
+  <div style="max-width:900px;margin:20px auto;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div>
+        <h2 style="color:#fff;margin:0;font-size:24px">🎨 Wizard de Estilo Visual</h2>
+        <p style="color:var(--muted);margin:4px 0 0;font-size:13px">Selecciona el estilo antes de generar renders. Esto garantiza coherencia visual.</p>
+      </div>
+      <button onclick="closeStyleWizard()" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer">✕</button>
+    </div>
+
+    <!-- Step 1: Architecture Style -->
+    <div class="sw-section">
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">1. Estilo Arquitectónico</h3>
+      <div class="sw-grid" id="sw-arch-grid"></div>
+    </div>
+
+    <!-- Step 2: Interior Style -->
+    <div class="sw-section" style="margin-top:24px">
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">2. Estilo de Interiores</h3>
+      <div class="sw-grid" id="sw-interior-grid"></div>
+    </div>
+
+    <!-- Step 3: Color Palette -->
+    <div class="sw-section" style="margin-top:24px">
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">3. Paleta de Colores</h3>
+      <div class="sw-grid sw-grid-sm" id="sw-palette-grid"></div>
+    </div>
+
+    <!-- Step 4: Lighting -->
+    <div class="sw-section" style="margin-top:24px">
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">4. Iluminación Preferida</h3>
+      <div class="sw-grid sw-grid-sm" id="sw-lighting-grid"></div>
+    </div>
+
+    <!-- Summary + Launch -->
+    <div style="margin-top:28px;padding:20px;background:rgba(196,119,59,0.1);border:1px solid rgba(196,119,59,0.3);border-radius:12px">
+      <h3 style="color:#fff;margin:0 0 8px">Resumen del Estilo</h3>
+      <p id="sw-summary" style="color:var(--muted);font-size:13px;margin:0 0 16px">Selecciona opciones arriba para definir el ADN visual de tu proyecto</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <button onclick="launchSwarmWithStyle()" style="background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;padding:14px 32px;font-size:16px;font-weight:700;cursor:pointer;flex:1;min-width:200px">⚡ Generar Proyecto con este Estilo</button>
+        <button onclick="closeStyleWizard()" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:14px 20px;font-size:14px;cursor:pointer">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.sw-section{background:rgba(255,255,255,0.03);border-radius:12px;padding:16px}
+.sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.sw-grid-sm{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.sw-card{
+  border-radius:10px;overflow:hidden;cursor:pointer;
+  border:2px solid transparent;transition:all 0.3s;
+  background:var(--card);position:relative;
+}
+.sw-card:hover{border-color:rgba(196,119,59,0.5);transform:translateY(-2px)}
+.sw-card.selected{border-color:var(--gold);box-shadow:0 0 16px rgba(196,119,59,0.3)}
+.sw-card.selected::after{
+  content:'✓';position:absolute;top:8px;right:8px;
+  background:var(--gold);color:#fff;width:24px;height:24px;
+  border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:700;
+}
+.sw-card img{width:100%;height:120px;object-fit:cover;display:block}
+.sw-card-label{padding:8px 10px;font-size:12px;font-weight:600;color:#fff}
+.sw-card-desc{padding:0 10px 8px;font-size:10px;color:var(--muted);line-height:1.3}
+.sw-color-strip{display:flex;height:40px;border-radius:6px;overflow:hidden;margin-bottom:4px}
+.sw-color-strip div{flex:1}
+</style>
+
 <!-- SWARM DASHBOARD OVERLAY -->
 <div id="swarm-overlay">
   <div id="swarm-header">
@@ -2705,10 +2776,8 @@ async function sendChat() {
   // Swarm activation: detect "100 agentes", "swarm", "ruflo", "desplegar agentes"
   const swarmKeywords = /(?:100\s*agentes|swarm|ruflo|desplegar\s*agentes|genera(?:r)?\s+(?:todo|el\s+proyecto|proyecto\s+completo)|lanzar\s+agentes)/i;
   if (swarmKeywords.test(text)) {
-    const projectInfo = parseProjectFromChat();
-    if (!projectInfo.name) projectInfo.name = 'Mi Proyecto';
-    addMsg('assistant', `🚀 <strong>Activando Ruflo Swarm Engine</strong><br>Desplegando 100 agentes sincronizados para: <strong>${projectInfo.name}</strong><br>Topología: mesh adaptiva · Ejecución paralela máxima`);
-    setTimeout(() => runSwarm(projectInfo), 500);
+    addMsg('assistant', '🎨 <strong>Abriendo Wizard de Estilo</strong> — Selecciona el estilo visual antes de generar para que todos los renders sean coherentes.');
+    setTimeout(() => openStyleWizard(), 300);
     return;
   }
 
@@ -3567,6 +3636,8 @@ function decomposeProjectTasks(projectInfo) {
   const style = geo.architecture[0] || 'luxury Caribbean';
   const unitTypes = projectInfo.units || ['Villa', 'Townhouse', 'Apartamento'];
   const locPrompt = locationCtx ? `, IMPORTANT LOCATION CONTEXT: ${locationCtx}` : '';
+  // Style DNA from wizard (consistent across ALL renders)
+  const styleDNA = state.__styleDNA ? `, STYLE: ${state.__styleDNA}` : '';
 
   // Smart render calculation: more unit types = fewer scenes per unit to stay manageable
   // but always enough to cover all spaces
@@ -3612,7 +3683,7 @@ function decomposeProjectTasks(projectInfo) {
   ];
   exteriorScenes.forEach((s, i) => {
     tasks.push({ id: id++, type: 'render', name: `Render Ext ${i+1}`, task: s.task, taskFn: 'render',
-      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}, photorealistic architectural render, 8K, professional real estate photography, no text no watermark` });
+      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, photorealistic architectural render, 8K, professional real estate photography, no text no watermark` });
   });
 
   // Render agents — per unit type interiors (19-58)
@@ -3636,7 +3707,7 @@ function decomposeProjectTasks(projectInfo) {
   unitTypes.forEach(unit => {
     prioritizedScenes.forEach((s, i) => {
       tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,6)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
-        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}, photorealistic interior render, 8K, professional photography, no text no watermark` });
+        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, photorealistic interior render, 8K, professional photography, no text no watermark` });
     });
   });
 
@@ -3821,6 +3892,157 @@ async function runSwarm(projectInfo) {
 }
 
 // Parse project info from chat context
+// =============================================
+// STYLE WIZARD
+// =============================================
+const STYLE_OPTIONS = {
+  architecture: [
+    { id: 'tropical-modern', label: 'Tropical Moderna', desc: 'Líneas limpias, techos planos, ventanales amplios, integración con naturaleza', img: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=400&h=250&fit=crop', prompt: 'tropical modern architecture, clean lines, flat roof, floor-to-ceiling windows, indoor-outdoor living' },
+    { id: 'mediterranean', label: 'Mediterránea', desc: 'Arcos, tejas de barro, estuco blanco, terrazas con vista', img: 'https://images.unsplash.com/photo-1523217582562-09d0def993a6?w=400&h=250&fit=crop', prompt: 'Mediterranean architecture, white stucco walls, terracotta roof tiles, arched windows, stone accents' },
+    { id: 'minimalist', label: 'Minimalista', desc: 'Formas puras, concreto expuesto, menos es más', img: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=400&h=250&fit=crop', prompt: 'minimalist contemporary architecture, exposed concrete, geometric forms, monochrome palette, clean volumes' },
+    { id: 'colonial-caribbean', label: 'Colonial Caribeña', desc: 'Colores vibrantes, balcones de madera, techos altos', img: 'https://images.unsplash.com/photo-1580587771525-78b9dba3b914?w=400&h=250&fit=crop', prompt: 'Caribbean colonial architecture, colorful facade, wooden balconies, high ceilings, tropical details' },
+    { id: 'industrial-loft', label: 'Industrial Loft', desc: 'Ladrillo expuesto, acero, espacios abiertos de doble altura', img: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=400&h=250&fit=crop', prompt: 'industrial loft architecture, exposed brick, steel beams, open floor plan, double height ceilings, raw materials' },
+    { id: 'eco-sustainable', label: 'Eco-Sostenible', desc: 'Techos verdes, materiales naturales, paneles solares', img: 'https://images.unsplash.com/photo-1518780664697-55e3ad937233?w=400&h=250&fit=crop', prompt: 'eco sustainable architecture, green roof, natural materials, bamboo, solar panels, living walls, biophilic design' }
+  ],
+  interior: [
+    { id: 'luxury-modern', label: 'Lujo Moderno', desc: 'Mármol, acabados premium, muebles de diseñador', img: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=400&h=250&fit=crop', prompt: 'luxury modern interior, marble floors, designer furniture, premium finishes, crystal chandeliers' },
+    { id: 'scandinavian', label: 'Escandinavo', desc: 'Madera clara, blancos, simplicidad funcional', img: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=250&fit=crop', prompt: 'Scandinavian interior design, light wood, white walls, functional simplicity, hygge atmosphere, natural textiles' },
+    { id: 'boho-tropical', label: 'Boho Tropical', desc: 'Ratán, plantas, texturas naturales, colores tierra', img: 'https://images.unsplash.com/photo-1617806118233-18e1de247200?w=400&h=250&fit=crop', prompt: 'bohemian tropical interior, rattan furniture, indoor plants, natural textures, earth tones, macrame, woven textiles' },
+    { id: 'contemporary-art', label: 'Contemporáneo + Arte', desc: 'Galería en casa, piezas statement, sofisticado', img: 'https://images.unsplash.com/photo-1600607687644-c7171b42498f?w=400&h=250&fit=crop', prompt: 'contemporary art gallery interior, statement art pieces, sophisticated furniture, gallery lighting, curated decor' },
+    { id: 'resort-spa', label: 'Resort & Spa', desc: 'Zen, piedra natural, agua, iluminación ambiental', img: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&h=250&fit=crop', prompt: 'resort spa interior, zen atmosphere, natural stone, water features, ambient lighting, bamboo, orchids' },
+    { id: 'coastal-chic', label: 'Coastal Chic', desc: 'Blancos y azules, madera drift, vistas al mar', img: 'https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?w=400&h=250&fit=crop', prompt: 'coastal chic interior, white and blue palette, driftwood accents, ocean views, linen fabrics, nautical details' }
+  ],
+  palette: [
+    { id: 'warm-earth', label: 'Tierra Cálida', colors: ['#8B6914', '#C4773B', '#D4A76A', '#F5E6CC', '#2C1810'], prompt: 'warm earth tone color palette, terracotta, sand, cream, dark wood' },
+    { id: 'ocean-breeze', label: 'Brisa Marina', colors: ['#1B4965', '#5FA8D3', '#BEE9E8', '#FFFFFF', '#CAD2C5'], prompt: 'ocean blue and white color palette, coastal, fresh, aquamarine accents' },
+    { id: 'monochrome', label: 'Monocromático', colors: ['#1a1a1a', '#333333', '#666666', '#cccccc', '#ffffff'], prompt: 'monochrome color palette, black white grey, sophisticated, high contrast' },
+    { id: 'tropical-vibrant', label: 'Tropical Vibrante', colors: ['#2D6A4F', '#52B788', '#F4A261', '#E76F51', '#264653'], prompt: 'vibrant tropical color palette, lush green, orange, coral, teal accents' },
+    { id: 'neutral-luxury', label: 'Neutro Lujoso', colors: ['#B8A898', '#D4C5B5', '#E8DDD3', '#F5F0EB', '#8C7B6B'], prompt: 'neutral luxury color palette, beige, taupe, cream, warm grey, gold accents' },
+    { id: 'bold-contemporary', label: 'Audaz Contemporáneo', colors: ['#000000', '#FFFFFF', '#C4773B', '#2C3E50', '#E74C3C'], prompt: 'bold contemporary palette, black, white, copper accents, deep blue, dramatic red' }
+  ],
+  lighting: [
+    { id: 'golden-hour', label: 'Hora Dorada', desc: 'Atardecer cálido, sombras largas', prompt: 'golden hour warm lighting, long shadows, orange sun glow, magic hour photography' },
+    { id: 'bright-midday', label: 'Mediodía Brillante', desc: 'Luz natural intensa, cielos azules', prompt: 'bright midday natural light, blue sky, strong shadows, vivid colors, sharp details' },
+    { id: 'overcast-soft', label: 'Nublado Suave', desc: 'Luz difusa, sin sombras duras', prompt: 'overcast soft diffused lighting, no harsh shadows, even illumination, professional photography lighting' },
+    { id: 'twilight', label: 'Crepúsculo', desc: 'Luces interiores encendidas, cielo azul oscuro', prompt: 'twilight blue hour, interior lights glowing warmly, dark blue sky, architectural lighting, dramatic mood' },
+    { id: 'tropical-morning', label: 'Mañana Tropical', desc: 'Luz fresca, verde brillante, rocío', prompt: 'tropical morning light, fresh dewy atmosphere, bright green vegetation, cool shadows, clear sky' }
+  ]
+};
+
+let __wizardSelection = { architecture: null, interior: null, palette: null, lighting: null };
+
+function openStyleWizard() {
+  __wizardSelection = { architecture: null, interior: null, palette: null, lighting: null };
+  const wiz = document.getElementById('style-wizard');
+  wiz.style.display = '';
+
+  // Render architecture cards
+  document.getElementById('sw-arch-grid').innerHTML = STYLE_OPTIONS.architecture.map(s =>
+    `<div class="sw-card" data-cat="architecture" data-id="${s.id}" onclick="selectStyleOption(this,'architecture','${s.id}')">
+      <img src="${s.img}" alt="${s.label}" loading="lazy" onerror="this.style.background='var(--card)';this.style.height='120px'">
+      <div class="sw-card-label">${s.label}</div>
+      <div class="sw-card-desc">${s.desc}</div>
+    </div>`
+  ).join('');
+
+  // Render interior cards
+  document.getElementById('sw-interior-grid').innerHTML = STYLE_OPTIONS.interior.map(s =>
+    `<div class="sw-card" data-cat="interior" data-id="${s.id}" onclick="selectStyleOption(this,'interior','${s.id}')">
+      <img src="${s.img}" alt="${s.label}" loading="lazy" onerror="this.style.background='var(--card)';this.style.height='120px'">
+      <div class="sw-card-label">${s.label}</div>
+      <div class="sw-card-desc">${s.desc}</div>
+    </div>`
+  ).join('');
+
+  // Render palette cards
+  document.getElementById('sw-palette-grid').innerHTML = STYLE_OPTIONS.palette.map(s =>
+    `<div class="sw-card" data-cat="palette" data-id="${s.id}" onclick="selectStyleOption(this,'palette','${s.id}')">
+      <div class="sw-color-strip">${s.colors.map(c => `<div style="background:${c}"></div>`).join('')}</div>
+      <div class="sw-card-label">${s.label}</div>
+    </div>`
+  ).join('');
+
+  // Render lighting cards
+  document.getElementById('sw-lighting-grid').innerHTML = STYLE_OPTIONS.lighting.map(s =>
+    `<div class="sw-card" data-cat="lighting" data-id="${s.id}" onclick="selectStyleOption(this,'lighting','${s.id}')">
+      <div style="height:60px;display:flex;align-items:center;justify-content:center;font-size:28px;background:rgba(255,255,255,0.03)">${
+        s.id === 'golden-hour' ? '🌅' : s.id === 'bright-midday' ? '☀️' : s.id === 'overcast-soft' ? '☁️' : s.id === 'twilight' ? '🌆' : '🌿'
+      }</div>
+      <div class="sw-card-label">${s.label}</div>
+      <div class="sw-card-desc">${s.desc}</div>
+    </div>`
+  ).join('');
+
+  updateWizardSummary();
+}
+
+function closeStyleWizard() {
+  document.getElementById('style-wizard').style.display = 'none';
+}
+
+function selectStyleOption(el, category, id) {
+  // Deselect others in same category
+  el.parentElement.querySelectorAll('.sw-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  __wizardSelection[category] = id;
+  updateWizardSummary();
+}
+
+function updateWizardSummary() {
+  const parts = [];
+  if (__wizardSelection.architecture) {
+    const s = STYLE_OPTIONS.architecture.find(o => o.id === __wizardSelection.architecture);
+    if (s) parts.push(`🏗️ ${s.label}`);
+  }
+  if (__wizardSelection.interior) {
+    const s = STYLE_OPTIONS.interior.find(o => o.id === __wizardSelection.interior);
+    if (s) parts.push(`🛋️ ${s.label}`);
+  }
+  if (__wizardSelection.palette) {
+    const s = STYLE_OPTIONS.palette.find(o => o.id === __wizardSelection.palette);
+    if (s) parts.push(`🎨 ${s.label}`);
+  }
+  if (__wizardSelection.lighting) {
+    const s = STYLE_OPTIONS.lighting.find(o => o.id === __wizardSelection.lighting);
+    if (s) parts.push(`💡 ${s.label}`);
+  }
+  document.getElementById('sw-summary').textContent = parts.length > 0
+    ? `Estilo seleccionado: ${parts.join(' · ')}`
+    : 'Selecciona opciones arriba para definir el ADN visual de tu proyecto';
+}
+
+function getStylePromptDNA() {
+  const parts = [];
+  if (__wizardSelection.architecture) {
+    const s = STYLE_OPTIONS.architecture.find(o => o.id === __wizardSelection.architecture);
+    if (s) parts.push(s.prompt);
+  }
+  if (__wizardSelection.interior) {
+    const s = STYLE_OPTIONS.interior.find(o => o.id === __wizardSelection.interior);
+    if (s) parts.push(s.prompt);
+  }
+  if (__wizardSelection.palette) {
+    const s = STYLE_OPTIONS.palette.find(o => o.id === __wizardSelection.palette);
+    if (s) parts.push(s.prompt);
+  }
+  if (__wizardSelection.lighting) {
+    const s = STYLE_OPTIONS.lighting.find(o => o.id === __wizardSelection.lighting);
+    if (s) parts.push(s.prompt);
+  }
+  return parts.join(', ');
+}
+
+function launchSwarmWithStyle() {
+  closeStyleWizard();
+  // Store the style DNA for use in render prompts
+  state.__styleDNA = getStylePromptDNA();
+  // Launch swarm
+  const projectInfo = parseProjectFromChat();
+  if (!projectInfo.name) projectInfo.name = 'Mi Proyecto';
+  addMsg('assistant', `🚀 <strong>Activando Ruflo Swarm Engine</strong><br>Estilo: <strong>${getStylePromptDNA().slice(0, 100)}...</strong><br>Desplegando agentes para: <strong>${projectInfo.name}</strong>`);
+  setTimeout(() => runSwarm(projectInfo), 500);
+}
+
 function parseProjectFromChat() {
   const history = state.chatHistory.map(m => m.content).join(' ').toLowerCase();
   const info = {
