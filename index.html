@@ -1067,23 +1067,31 @@ function refreshProjectList() {
     </div>`;
   }).join('');
 
-  // Attach click handlers directly to each card element
-  setTimeout(() => {
-    document.querySelectorAll('#project-list .project-card').forEach(card => {
-      card.onclick = function(e) {
-        if (e.target.tagName === 'BUTTON' || e.target.closest('.proj-delete-btn')) return;
-        const idx = parseInt(this.dataset.idx);
-        if (!isNaN(idx)) loadProject(idx);
-      };
-    });
-    document.querySelectorAll('#project-list .proj-delete-btn').forEach(btn => {
-      btn.onclick = function(e) {
-        e.stopPropagation();
-        const idx = parseInt(this.dataset.idx);
-        if (!isNaN(idx)) deleteProject(idx);
-      };
-    });
-  }, 50);
+  // Make every project card clickable — multiple approaches for reliability
+  const cards = list.querySelectorAll('.project-card');
+  cards.forEach(card => {
+    // Method 1: onclick property
+    card.onclick = function(e) {
+      if (e.target.closest('.proj-delete-btn')) return;
+      const idx = parseInt(this.getAttribute('data-idx'));
+      if (!isNaN(idx)) loadProject(idx);
+    };
+    // Method 2: touchend for mobile
+    card.addEventListener('touchend', function(e) {
+      if (e.target.closest('.proj-delete-btn')) return;
+      const idx = parseInt(this.getAttribute('data-idx'));
+      if (!isNaN(idx)) {
+        e.preventDefault();
+        loadProject(idx);
+      }
+    }, { passive: false });
+  });
+  list.querySelectorAll('.proj-delete-btn').forEach(btn => {
+    btn.onclick = function(e) {
+      e.stopPropagation();
+      deleteProject(parseInt(this.getAttribute('data-idx')));
+    };
+  });
 }
 
 function getAllSavedProjects() {
@@ -1132,62 +1140,70 @@ function startNewProject() {
 }
 
 function loadProject(idx) {
+  // Get project data first (before hiding selector)
+  var p;
   try {
-    const projects = getAllSavedProjects();
-    const p = projects[idx];
-    if (!p) { showToast('⚠️ Proyecto no encontrado'); return; }
+    var projects = getAllSavedProjects();
+    p = projects[idx];
+  } catch(e) {
+    alert('Error leyendo proyecto: ' + e.message);
+    return;
+  }
+  if (!p) { alert('Proyecto no encontrado (index: ' + idx + ')'); return; }
 
-    document.getElementById('project-selector').style.display = 'none';
-    newProject(true);
+  // Hide selector
+  document.getElementById('project-selector').style.display = 'none';
 
-  // Restore project data
-  if (p.images) Object.assign(IMG, p.images);
-  if (p.scenes) Object.assign(SCENES, p.scenes);
-  if (p.units && Array.isArray(p.units)) UNITS.push(...p.units);
-  if (p.floorPlans) Object.assign(FLOOR_PLANS, p.floorPlans);
-  state.projectName = p.name || '';
-  state.projectLocation = p.location || '';
-  if (p.styleDNA) state.__styleDNA = p.styleDNA;
-  if (p.styleSeed) state.__styleSeed = p.styleSeed;
-  if (p.chatHistory) state.chatHistory = p.chatHistory;
-  state.__currentProjectKey = p.__storageKey;
+  // Clear current project
+  try { newProject(true); } catch(e) { console.error('newProject error:', e); }
+
+  // Restore data
+  try {
+    if (p.images) Object.assign(IMG, p.images);
+    if (p.scenes) Object.assign(SCENES, p.scenes);
+    if (p.units && Array.isArray(p.units)) UNITS.push(...p.units);
+    if (p.floorPlans) Object.assign(FLOOR_PLANS, p.floorPlans);
+    state.projectName = p.name || '';
+    state.projectLocation = p.location || '';
+    if (p.styleDNA) state.__styleDNA = p.styleDNA;
+    if (p.styleSeed) state.__styleSeed = p.styleSeed;
+    if (p.chatHistory) state.chatHistory = p.chatHistory;
+    state.__currentProjectKey = p.__storageKey;
+  } catch(e) { console.error('Restore data error:', e); }
 
   // Populate builder fields
-  const bName = document.getElementById('b-name');
-  const bLoc = document.getElementById('b-location');
-  const bLocCtx = document.getElementById('b-location-context');
-  const bDesc = document.getElementById('b-description');
-  if (bName && p.name) bName.value = p.name;
-  if (bLoc && p.location) bLoc.value = p.location;
-  if (bLocCtx && p.locationContext) bLocCtx.value = p.locationContext;
-  if (bDesc && p.description) bDesc.value = p.description;
+  try {
+    var bName = document.getElementById('b-name');
+    var bLoc = document.getElementById('b-location');
+    if (bName && p.name) bName.value = p.name;
+    if (bLoc && p.location) bLoc.value = p.location;
+  } catch(e) {}
 
-  // Restore chat
-  if (p.chatHistory && p.chatHistory.length > 0) {
-    const chatEl = document.getElementById('chat-messages');
-    if (chatEl) {
-      chatEl.innerHTML = p.chatHistory.map(m =>
-        `<div class="msg msg-${m.role}"><div class="msg-bubble">${m.content}</div></div>`
-      ).join('');
+  // Restore chat messages
+  try {
+    if (p.chatHistory && p.chatHistory.length > 0) {
+      var chatEl = document.getElementById('chat-messages');
+      if (chatEl) {
+        chatEl.innerHTML = p.chatHistory.map(function(m) {
+          return '<div class="msg msg-' + m.role + '"><div class="msg-bubble">' + m.content + '</div></div>';
+        }).join('');
+      }
     }
-  }
+  } catch(e) { console.error('Restore chat error:', e); }
 
-  // Set first scene
-  const first = p.currentScene || Object.keys(SCENES)[0];
-  if (first && SCENES[first]) state.currentScene = first;
+  // Set scene and build UI
+  try {
+    var first = p.currentScene || Object.keys(SCENES)[0];
+    if (first && SCENES[first]) state.currentScene = first;
+    buildGallery();
+  } catch(e) { console.error('buildGallery error:', e); }
 
-  buildGallery();
-  if (typeof buildUnits === 'function') buildUnits();
-  updateMinimap();
-  if (typeof buildFloorPlans === 'function') buildFloorPlans();
-  setTimeout(() => { window.__tourInited = false; initTourEngine(); }, 300);
+  try { updateMinimap(); } catch(e) {}
+  try { if (typeof buildUnits === 'function') buildUnits(); } catch(e) {}
+  try { if (typeof buildFloorPlans === 'function') buildFloorPlans(); } catch(e) {}
+  try { setTimeout(function() { window.__tourInited = false; initTourEngine(); }, 500); } catch(e) {}
 
-    showToast(`📂 Proyecto cargado: ${p.name || 'Sin nombre'}`);
-  } catch(e) {
-    console.error('Error loading project:', e);
-    showToast(`⚠️ Error cargando proyecto: ${e.message}`);
-    document.getElementById('project-selector').style.display = '';
-  }
+  showToast('Proyecto cargado: ' + (p.name || 'Sin nombre'));
 }
 
 function deleteProject(idx) {
