@@ -1638,6 +1638,11 @@ function deleteProject(idx) {
       <div style="font-size:11px;color:var(--muted);margin-top:4px">Gratis y muy rápido. <a href="https://console.groq.com/keys" target="_blank" style="color:var(--blue)">Obtener key gratis</a></div>
     </div>
     <div class="settings-field">
+      <label>Skybox AI Key <span style="color:var(--gold);font-weight:400">(panoramas 360° REALES — 5 gratis/mes)</span></label>
+      <input type="password" id="skybox-key-input" placeholder="Tu API key de Blockade Labs">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Genera panoramas 360° perfectos para el tour virtual. <a href="https://skybox.blockadelabs.com/api" target="_blank" style="color:var(--blue)">Obtener key gratis (5/mes)</a></div>
+    </div>
+    <div class="settings-field">
       <label>Stable Diffusion Local URL <span style="color:var(--muted);font-weight:400">(opcional — renders ilimitados)</span></label>
       <input type="text" id="local-sd-url-input" placeholder="http://localhost:7860">
       <div style="font-size:11px;color:var(--muted);margin-top:4px">Para renders locales con Draw Things o SD WebUI</div>
@@ -2787,6 +2792,7 @@ const state = {
   openaiKey: '',
   claudeKey: '',
   groqKey: '',
+  skyboxKey: '',
   chatModel: 'google/gemini-2.5-pro-exp-03-25:free',
   renderResultData: null,
   lightboxIdx: 0,
@@ -4534,6 +4540,15 @@ async function generateImage(prompt, opts = {}) {
 
     const providers = [];
 
+    // Provider 0: Skybox AI (best 360° panoramas, if key available)
+    if (state.skyboxKey && prompt.toLowerCase().includes('panoram')) {
+      providers.push(async () => {
+        const result = await generateSkybox360(prompt);
+        if (result) { console.log('Skybox: ✅ 360° panorama'); return result; }
+        throw new Error('Skybox failed');
+      });
+    }
+
     // Provider 1: Local SD (if configured)
     const sdUrl = state.localSdUrl;
     if (sdUrl) {
@@ -5213,7 +5228,7 @@ function decomposeProjectTasks(projectInfo) {
   ];
   exteriorScenes.slice(0, maxExterior).forEach((s, i) => {
     tasks.push({ id: id++, type: 'render', name: `Render Ext ${i+1}`, task: s.task, taskFn: 'render',
-      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, equirectangular 360 degree hdri panoramic photograph, seamless left-right wrap, photorealistic architectural visualization, ultra high quality, 8K resolution, professional real estate photography, cinematic lighting, no text no watermark no logo, aspect ratio 2:1` });
+      prompt: `equirectangular projection, 360 degree VR panorama, ${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, seamless spherical panorama, continuous wrap-around view showing all directions, fisheye lens distortion at top and bottom, straight horizon line in the center, photorealistic architectural visualization, ultra high quality, 8K, professional photography, cinematic lighting, no text no watermark, 2:1 aspect ratio` });
   });
 
   // Render agents — per unit type interiors (19-58)
@@ -5237,7 +5252,7 @@ function decomposeProjectTasks(projectInfo) {
   unitTypes.forEach(unit => {
     prioritizedScenes.forEach((s, i) => {
       tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,6)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
-        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, equirectangular 360 degree hdri panoramic interior photograph, seamless left-right wrap, photorealistic interior visualization, ultra high quality, 8K resolution, professional interior photography, cinematic warm lighting, no text no watermark no logo, aspect ratio 2:1` });
+        prompt: `equirectangular projection, 360 degree VR interior panorama, ${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, seamless spherical interior panorama, continuous wrap-around room view showing all walls floor and ceiling, fisheye lens distortion at top and bottom, straight horizon line in center, photorealistic interior visualization, ultra high quality, 8K, professional photography, warm cinematic lighting, no text no watermark, 2:1 aspect ratio` });
     });
   });
 
@@ -5818,6 +5833,76 @@ function stopAmbientSound() {
   }
 }
 
+// =============================================
+// SKYBOX AI — True 360° Panorama Generation (Blockade Labs)
+// =============================================
+async function generateSkybox360(prompt) {
+  const apiKey = state.skyboxKey || localStorage.getItem('cayenabot_skybox_key') || '';
+  if (!apiKey) return null;
+
+  try {
+    // Step 1: Submit generation
+    const submitResp = await fetch('https://backend.blockadelabs.com/api/v1/skybox', {
+      method: 'POST',
+      signal: AbortSignal.timeout(15000),
+      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: `${prompt}, photorealistic, luxury architecture, high detail, equirectangular 360 panorama`,
+        skybox_style_id: 67, // M3 Photoreal style
+        enhance_prompt: true
+      })
+    });
+
+    if (!submitResp.ok) {
+      console.log('Skybox submit error:', submitResp.status);
+      return null;
+    }
+
+    const submitData = await submitResp.json();
+    const obfuscatedId = submitData.obfuscated_id;
+    if (!obfuscatedId) return null;
+
+    console.log('Skybox: generation started, polling...');
+
+    // Step 2: Poll for completion (max 2 minutes)
+    const maxWait = 120000;
+    const t0 = Date.now();
+    while (Date.now() - t0 < maxWait) {
+      await new Promise(r => setTimeout(r, 4000));
+      try {
+        const pollResp = await fetch(`https://backend.blockadelabs.com/api/v1/imagine/requests/${obfuscatedId}`, {
+          headers: { 'x-api-key': apiKey },
+          signal: AbortSignal.timeout(10000)
+        });
+        if (!pollResp.ok) continue;
+        const pollData = await pollResp.json();
+        const req = pollData.request;
+
+        if (req.status === 'complete' && req.file_url) {
+          console.log('Skybox: ✅ 360° panorama generated!');
+          // Convert to data URL for Pannellum/PSV compatibility
+          try {
+            const imgResp = await fetch(req.file_url, { signal: AbortSignal.timeout(15000) });
+            if (imgResp.ok) {
+              const blob = await imgResp.blob();
+              return await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+            }
+          } catch(e) {}
+          return req.file_url; // fallback to URL
+        }
+        if (req.status === 'error') {
+          console.log('Skybox error:', req.error_message);
+          return null;
+        }
+      } catch(e) { /* continue polling */ }
+    }
+    console.log('Skybox: timeout');
+  } catch(e) {
+    console.log('Skybox error:', e.message);
+  }
+  return null;
+}
+
 // Pollinations video generation (free, 1/hr)
 async function generateTransitionVideo(fromLabel, toLabel) {
   const prompt = encodeURIComponent(`Smooth first person walking transition from ${fromLabel} to ${toLabel}, luxury Caribbean architecture, steady cam, 5 seconds, cinematic, 4K`);
@@ -6002,6 +6087,7 @@ function openSettings() {
   document.getElementById('openai-key-input').value = state.openaiKey || '';
   document.getElementById('claude-key-input').value = state.claudeKey || '';
   document.getElementById('groq-key-input').value = state.groqKey || '';
+  document.getElementById('skybox-key-input').value = state.skyboxKey || '';
   document.getElementById('local-sd-url-input').value = state.localSdUrl || '';
   document.getElementById('or-status').innerHTML = '';
   document.getElementById('local-sd-status').innerHTML = '';
@@ -6025,6 +6111,10 @@ function saveSettings() {
   const groqVal = document.getElementById('groq-key-input').value.trim();
   if (groqVal) { state.groqKey = groqVal; localStorage.setItem('cayenabot_groq_key', groqVal); }
   else { state.groqKey = ''; localStorage.removeItem('cayenabot_groq_key'); }
+
+  const skyboxVal = document.getElementById('skybox-key-input').value.trim();
+  if (skyboxVal) { state.skyboxKey = skyboxVal; localStorage.setItem('cayenabot_skybox_key', skyboxVal); }
+  else { state.skyboxKey = ''; localStorage.removeItem('cayenabot_skybox_key'); }
 
   const sdVal = document.getElementById('local-sd-url-input').value.trim().replace(/\/+$/, '');
   if (sdVal) { state.localSdUrl = sdVal; localStorage.setItem('cayenabot_local_sd_url', sdVal); }
@@ -7621,6 +7711,8 @@ function init() {
   if (savedClaude) state.claudeKey = savedClaude;
   const savedGroq = localStorage.getItem('cayenabot_groq_key');
   if (savedGroq) state.groqKey = savedGroq;
+  const savedSkybox = localStorage.getItem('cayenabot_skybox_key');
+  if (savedSkybox) state.skyboxKey = savedSkybox;
   
   // Don't auto-load — user selects project from project selector after login
   __setupAutoSave();
