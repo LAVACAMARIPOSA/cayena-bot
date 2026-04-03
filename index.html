@@ -1149,7 +1149,7 @@ function deleteProject(idx) {
     <!-- VIRTUAL TOUR -->
     <div id="tour-view" class="tab-view active">
       <!-- Flat tour viewer (main) -->
-      <div id="tour-flat-viewer" style="position:absolute;inset:0;z-index:2;background:#0a0a1a;display:flex;align-items:center;justify-content:center;overflow:hidden">
+      <div id="tour-flat-viewer" style="position:absolute;inset:0;z-index:2;background:#0a0a1a;display:none;align-items:center;justify-content:center;overflow:hidden">
         <div id="tour-flat-pan" style="width:100%;height:100%;overflow:hidden;cursor:grab;position:relative">
           <img id="tour-flat-img" style="width:100%;height:100%;object-fit:cover;transition:opacity 0.5s ease,transform 0.15s ease;transform-origin:center center" alt="Tour" draggable="false">
         </div>
@@ -1163,7 +1163,7 @@ function deleteProject(idx) {
         </div>
       </div>
       <!-- Pannellum 360 (hidden by default, toggle with button) -->
-      <div id="pannellum-container" style="position:absolute;inset:0;z-index:1;display:none"></div>
+      <div id="pannellum-container" style="position:absolute;inset:0;z-index:3"></div>
       <canvas id="tour-canvas" style="display:none"></canvas>
       <div id="tour-overlay"></div>
 
@@ -1176,8 +1176,8 @@ function deleteProject(idx) {
 
       <!-- View mode toggle + camera -->
       <div style="position:absolute;top:16px;left:16px;z-index:25;display:flex;gap:6px">
-        <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:var(--gold);color:#fff;border:none">🖼️ Recorrido</button>
-        <button id="tour-mode-360" onclick="setTourMode('360')" style="display:none;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🌐 360°</button>
+        <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:var(--gold);color:#fff;border:none">🌐 Tour 360°</button>
+        <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🖼️ Galería</button>
         <button onclick="openCameraCapture()" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">📷 Capturar</button>
       </div>
 
@@ -2948,7 +2948,7 @@ Responde profesional, conciso y proactivo. Si no tiene info del proyecto, pregun
 // =============================================
 // FLAT TOUR VIEWER (primary mode for AI renders)
 // =============================================
-let __tourMode = 'flat'; // 'flat' or '360'
+let __tourMode = '360'; // '360' or 'flat'
 let __flatTourIdx = 0;
 
 function setTourMode(mode) {
@@ -3312,8 +3312,13 @@ let __tourRAF = null;
 // THREE.JS PANORAMIC TOUR ENGINE (fallback if Pannellum fails)
 // =========================================
 function initTourEngine() {
-  // Default: flat mode for AI renders (they're not 360° panoramas)
+  // Default: 360° mode (renders are now equirectangular panoramas)
   if (Object.keys(SCENES).length > 0) {
+    if (typeof pannellum !== 'undefined') {
+      if (initPannellumTour()) { window.__tourInited = true; return; }
+    }
+    // Fallback to flat mode if Pannellum fails
+    __tourMode = 'flat';
     updateFlatTour();
     window.__tourInited = true;
     return;
@@ -4394,7 +4399,7 @@ async function generateImage(prompt, opts = {}) {
         headers: { 'Content-Type': 'application/json', 'apikey': '0000000000', 'Client-Agent': 'CayenaBot:1.0:cayenabot' },
         body: JSON.stringify({
           prompt: `photorealistic architectural render, luxury real estate, ${prompt}, professional photography ### blurry, cartoon, anime, nsfw, nude, person`,
-          params: { width: 1024, height: 768, steps: 20, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
+          params: { width: 1024, height: 512, steps: 20, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
           models: ['AlbedoBase XL (SDXL)', 'SDXL 1.0', 'Deliberate', 'stable_diffusion'],
           nsfw: true, censor_nsfw: false, r2: true, replacement_filter: true
         })
@@ -5036,7 +5041,7 @@ function decomposeProjectTasks(projectInfo) {
   ];
   exteriorScenes.slice(0, maxExterior).forEach((s, i) => {
     tasks.push({ id: id++, type: 'render', name: `Render Ext ${i+1}`, task: s.task, taskFn: 'render',
-      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, ultra wide angle lens 14mm, photorealistic architectural render, ultra high quality, 8K, professional real estate photography, cinematic lighting, dramatic composition, no text no watermark no logo` });
+      prompt: `${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, equirectangular 360 degree hdri panoramic photograph, seamless left-right wrap, photorealistic architectural visualization, ultra high quality, 8K resolution, professional real estate photography, cinematic lighting, no text no watermark no logo, aspect ratio 2:1` });
   });
 
   // Render agents — per unit type interiors (19-58)
@@ -5060,7 +5065,7 @@ function decomposeProjectTasks(projectInfo) {
   unitTypes.forEach(unit => {
     prioritizedScenes.forEach((s, i) => {
       tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,6)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
-        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, ultra wide angle lens 14mm, photorealistic interior render, ultra high quality, 8K, professional interior photography, cinematic warm lighting, dramatic composition, no text no watermark no logo` });
+        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, equirectangular 360 degree hdri panoramic interior photograph, seamless left-right wrap, photorealistic interior visualization, ultra high quality, 8K resolution, professional interior photography, cinematic warm lighting, no text no watermark no logo, aspect ratio 2:1` });
     });
   });
 
