@@ -874,7 +874,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 // Multi-user system
 const __USERS = [
   { id: 'ISA', name: 'Isa', pass: '151202', color: '#e05090', emoji: '💩' },
-  { id: 'JAG', name: 'Jag', pass: '121174', color: '#c4773b', emoji: '😤' },
+  { id: 'JAG', name: 'Jag', pass: '121174', color: '#c4773b', emoji: '🤬' },
   { id: 'PAM', name: 'Pam', pass: '260572', color: '#5b8def', emoji: '🥰' },
   { id: 'ALV', name: 'Alv', pass: '221297', color: '#10b981', emoji: '👨‍💻' }
 ];
@@ -2701,34 +2701,59 @@ const state = {
 // WEB SEARCH (SerpAPI via CORS proxy)
 // =============================================
 async function webSearch(query) {
+  const results = [];
+
+  // Method 1: DuckDuckGo Instant Answer API (free, no key, no limit)
   try {
-    const serpUrl = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&api_key=${__SERP_KEY}&hl=es&gl=do&num=5`;
-    const proxies = [
-      `https://corsproxy.io/?url=${encodeURIComponent(serpUrl)}`,
-      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(serpUrl)}`
-    ];
-    for (const proxyUrl of proxies) {
-      try {
-        const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-        if (!resp.ok) continue;
+    const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+    const resp = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(ddgUrl)}`, { signal: AbortSignal.timeout(8000) });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.Abstract) results.push({ title: data.Heading || 'DuckDuckGo', snippet: data.Abstract, url: data.AbstractURL || '' });
+      if (data.Answer) results.push({ title: 'Respuesta directa', snippet: data.Answer, url: '' });
+      (data.RelatedTopics || []).slice(0, 4).forEach(t => {
+        if (t.Text) results.push({ title: t.FirstURL?.split('/').pop()?.replace(/_/g, ' ') || '', snippet: t.Text, url: t.FirstURL || '' });
+      });
+    }
+  } catch(e) {}
+
+  // Method 2: DuckDuckGo HTML search (scrape lite version for more results)
+  if (results.length < 3) {
+    try {
+      const ddgHtml = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const resp = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(ddgHtml)}`, { signal: AbortSignal.timeout(8000) });
+      if (resp.ok) {
+        const html = await resp.text();
+        // Extract result snippets from HTML
+        const matches = html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi);
+        for (const m of matches) {
+          if (results.length >= 6) break;
+          const url = decodeURIComponent(m[1].replace(/.*uddg=/, '').replace(/&.*/, ''));
+          const title = m[2].replace(/<[^>]+>/g, '').trim();
+          const snippet = m[3].replace(/<[^>]+>/g, '').trim();
+          if (title && snippet) results.push({ title, snippet, url });
+        }
+      }
+    } catch(e) {}
+  }
+
+  // Method 3: SerpAPI fallback (limited but better results)
+  if (results.length < 2) {
+    try {
+      const serpUrl = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&api_key=${__SERP_KEY}&hl=es&gl=do&num=5`;
+      const resp = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(serpUrl)}`, { signal: AbortSignal.timeout(10000) });
+      if (resp.ok) {
         const data = await resp.json();
-        const results = [];
-        // Extract organic results
         (data.organic_results || []).slice(0, 5).forEach(r => {
           results.push({ title: r.title, snippet: r.snippet, url: r.link });
         });
-        // Extract answer box if available
-        if (data.answer_box?.snippet) results.unshift({ title: 'Respuesta directa', snippet: data.answer_box.snippet, url: '' });
-        if (data.answer_box?.answer) results.unshift({ title: 'Respuesta', snippet: data.answer_box.answer, url: '' });
-        // Knowledge graph
-        if (data.knowledge_graph?.description) results.push({ title: data.knowledge_graph.title || 'Info', snippet: data.knowledge_graph.description, url: '' });
-        return results;
-      } catch(e) { continue; }
-    }
-  } catch(e) {
-    console.log('Web search error:', e.message);
+        if (data.answer_box?.snippet) results.unshift({ title: 'Google', snippet: data.answer_box.snippet, url: '' });
+      }
+    } catch(e) {}
   }
-  return [];
+
+  console.log(`Web search "${query}": ${results.length} results`);
+  return results;
 }
 
 // Detect if a user message needs web search
