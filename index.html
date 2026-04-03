@@ -4885,6 +4885,83 @@ async function retryRender(agentId) {
   updateAgentCard(agent);
 }
 
+async function optimizeTour() {
+  const sceneKeys = Object.keys(SCENES);
+  if (sceneKeys.length < 2) { showToast('⚠️ Necesitas al menos 2 renders para optimizar'); return; }
+
+  showToast('🧠 Optimizando tour virtual...');
+  closeSwarm();
+
+  // Step 1: Ask AI to determine the best order for the scenes
+  const sceneLabels = sceneKeys.map((k, i) => `${i+1}. ${SCENES[k].label}`).join('\n');
+  try {
+    const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || state.freeModels?.[0] || 'qwen/qwen3-235b-a22b:free';
+
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST', signal: AbortSignal.timeout(30000),
+      headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+      body: JSON.stringify({
+        model: visionModel,
+        messages: [{ role: 'user', content: `You are an expert real estate virtual tour designer. Reorder these scenes into the best logical walkthrough path for a luxury property virtual tour. The tour should flow naturally as if walking through the property.
+
+Current scenes:
+${sceneLabels}
+
+Reply ONLY with the numbers in the optimal order, comma-separated. Example: 3,1,5,2,4,6
+Think about: start outside (entrance/facade) → common areas → unit interiors → special areas → end with best view/amenity.` }]
+      })
+    });
+
+    if (resp.ok) {
+      const d = await resp.json();
+      const orderText = d.choices?.[0]?.message?.content || '';
+      const numbers = orderText.match(/\d+/g)?.map(n => parseInt(n) - 1).filter(n => n >= 0 && n < sceneKeys.length);
+
+      if (numbers && numbers.length >= sceneKeys.length * 0.5) {
+        // Reorder SCENES based on AI recommendation
+        const oldScenes = {};
+        const oldImgs = {};
+        sceneKeys.forEach(k => { oldScenes[k] = { ...SCENES[k] }; oldImgs[k] = IMG[k] ? { ...IMG[k] } : null; });
+
+        // Clear and rebuild in new order
+        Object.keys(SCENES).forEach(k => delete SCENES[k]);
+        const reorderedKeys = numbers.map(n => sceneKeys[n]).filter(Boolean);
+        // Add any scenes not in the AI order at the end
+        sceneKeys.forEach(k => { if (!reorderedKeys.includes(k)) reorderedKeys.push(k); });
+
+        reorderedKeys.forEach(k => {
+          SCENES[k] = oldScenes[k];
+        });
+
+        // Rebuild navigation
+        __rebuildTourNavigation();
+        updateMinimap();
+        buildThumbstrip();
+        __flatTourIdx = 0;
+        updateFlatTour();
+
+        addMsg('assistant', `🧠 <strong>Tour optimizado</strong> — Las ${reorderedKeys.length} escenas fueron reordenadas en un recorrido lógico. Ve a Tour para verlo.`);
+        showToast(`✅ Tour optimizado: ${reorderedKeys.length} escenas reordenadas`);
+      } else {
+        addMsg('assistant', '⚠️ No se pudo optimizar el orden. El tour se mantiene como está.');
+      }
+    }
+  } catch(e) {
+    showToast('⚠️ Error optimizando: ' + e.message);
+  }
+
+  // Step 2: Identify gaps (areas that should exist but don't)
+  const existingAreas = sceneKeys.map(k => SCENES[k]?.label?.toLowerCase() || '');
+  const essentialAreas = ['fachada', 'entrada', 'lobby', 'piscina', 'living', 'cocina', 'dormitorio', 'baño'];
+  const missing = essentialAreas.filter(area => !existingAreas.some(l => l.includes(area)));
+  if (missing.length > 0) {
+    addMsg('assistant', `💡 <strong>Áreas faltantes sugeridas:</strong> ${missing.join(', ')}. Escribe "genera render de ${missing[0]}" para agregarlas al tour.`);
+  }
+
+  switchTab('tour');
+  __autoSaveProject();
+}
+
 async function retryAllFailed() {
   const failed = swarmState.agents.filter(a => a.renderFailed && a.prompt);
   if (failed.length === 0) { showToast('✅ No hay renders fallidos'); return; }
@@ -4962,7 +5039,17 @@ async function runSwarm(projectInfo) {
 
   document.getElementById('swarm-summary-title').textContent = `✅ Swarm completado — ${done} agentes exitosos`;
   const failedRenders = swarmState.agents.filter(a => a.renderFailed).length;
-  document.getElementById('swarm-summary-desc').innerHTML = `${tasks.length} agentes ejecutados en ${elapsed}s. ${errors} errores.${failedRenders > 0 ? `<br><button onclick="retryAllFailed()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px">🔄 Reintentar ${failedRenders} renders fallidos</button>` : ' ✅ Todos los renders generados.'} Contenido disponible en Preview.`;
+  const successRenders = swarmState.agents.filter(a => a.renderUrl).length;
+  let summaryHTML = `${tasks.length} agentes ejecutados en ${elapsed}s. 🎨 ${successRenders} renders generados.`;
+  if (failedRenders > 0) {
+    summaryHTML += `<br><button onclick="retryAllFailed()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px">🔄 Reintentar ${failedRenders} renders fallidos</button>`;
+  }
+  summaryHTML += `<br><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+    <button onclick="optimizeTour()" style="background:linear-gradient(135deg,#4a7cf7,#3b5bd4);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer">🧠 Optimizar Tour con AI</button>
+    <button onclick="closeSwarm();switchTab('tour')" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 20px;font-size:13px;cursor:pointer">🧭 Ver Tour Virtual</button>
+    <button onclick="closeSwarm();switchTab('gallery')" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 20px;font-size:13px;cursor:pointer">🖼️ Ver Galería</button>
+  </div>`;
+  document.getElementById('swarm-summary-desc').innerHTML = summaryHTML;
   document.getElementById('swarm-summary').classList.add('show');
 
   // Rebuild workspace
