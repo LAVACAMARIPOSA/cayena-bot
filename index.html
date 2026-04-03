@@ -6223,8 +6223,42 @@ function newProject(silent) {
   UNITS.length = 0; state.currentScene = ''; state.history = [];
   state.visited = new Set(); state.chatHistory = [];
   state.projectName = ''; state.projectLocation = '';
-  localStorage.removeItem('cayenabot_project');
-  buildGallery(); buildUnits(); updateMinimap();
+  state.__styleDNA = ''; state.__styleSeed = '';
+  state.__currentPlanSrc = null; state.__planAnalysis = '';
+
+  // Reset tour display
+  __flatTourIdx = 0;
+  const tourImg = document.getElementById('tour-flat-img');
+  if (tourImg) tourImg.src = '';
+  const emptyEl = document.getElementById('tour-empty');
+  if (emptyEl) emptyEl.style.display = '';
+  const counter = document.getElementById('tour-counter');
+  if (counter) counter.textContent = '';
+  const thumbstrip = document.getElementById('tour-thumbstrip');
+  if (thumbstrip) thumbstrip.innerHTML = '';
+  const minimap = document.getElementById('minimap');
+  if (minimap) minimap.innerHTML = '';
+  const sceneLabel = document.getElementById('scene-label');
+  if (sceneLabel) sceneLabel.textContent = 'Tour Virtual';
+  const sceneSub = document.getElementById('scene-sublabel');
+  if (sceneSub) sceneSub.textContent = 'Genera renders para activar el tour';
+
+  // Destroy Pannellum if active
+  if (typeof __pannellumViewer !== 'undefined' && __pannellumViewer) {
+    try { __pannellumViewer.destroy(); } catch(e) {}
+    __pannellumViewer = null;
+  }
+  window.__tourInited = false;
+
+  // Reset plan workspace
+  const planWiz = document.getElementById('plan-wizard');
+  if (planWiz) planWiz.style.display = '';
+  const planWork = document.getElementById('plan-workspace');
+  if (planWork) planWork.style.display = 'none';
+
+  buildGallery(); if (typeof buildUnits === 'function') buildUnits(); updateMinimap();
+  if (typeof buildFloorPlans === 'function') buildFloorPlans();
+
   if (!silent) {
     document.getElementById('chat-messages').innerHTML = '<div class="msg msg-assistant fade-enter"><div class="msg-bubble">🏗️ <strong>Nuevo proyecto</strong> — Cuéntame: nombre, ubicación, tipo de unidades y estilo.</div></div>';
     showToast('🆕 Proyecto nuevo');
@@ -6392,17 +6426,8 @@ function init() {
   // Don't auto-load — user selects project from project selector after login
   __setupAutoSave();
 
-  // Init tour UI
-  updateTourUI();
-  // Init Three.js tour engine
-  if (typeof THREE !== 'undefined') {
-    setTimeout(initTourEngine, 100);
-  } else {
-    // Wait for Three.js to load
-    const waitThree = setInterval(() => {
-      if (typeof THREE !== 'undefined') { clearInterval(waitThree); initTourEngine(); }
-    }, 100);
-  }
+  // DON'T init tour here — wait until a project is loaded from project selector
+  // Tour will be initialized when loadProject() or startNewProject() is called
   
   // Build gallery and units
   buildGallery();
