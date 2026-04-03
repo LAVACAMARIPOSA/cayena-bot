@@ -2465,6 +2465,31 @@ async function generateImage(prompt, opts = {}) {
       }
     }
 
+    // Fallback: OpenRouter Gemini image generation (same API that works for chat)
+    if (!fast) {
+      try {
+        console.log('Trying OpenRouter Gemini image gen...');
+        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST', signal: AbortSignal.timeout(60000),
+          headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+          body: JSON.stringify({
+            model: 'google/gemini-2.0-flash-exp:free',
+            messages: [{ role: 'user', content: `Generate a photorealistic architectural render image of: ${prompt}` }],
+            modalities: ['text', 'image']
+          })
+        });
+        if (resp.ok) {
+          const d = await resp.json();
+          const parts = d.choices?.[0]?.message?.content;
+          if (Array.isArray(parts)) {
+            const ip = parts.find(p => p.type === 'image_url' || p.inline_data);
+            if (ip?.image_url?.url) return ip.image_url.url;
+            if (ip?.inline_data?.data) return `data:${ip.inline_data.mime_type||'image/png'};base64,${ip.inline_data.data}`;
+          }
+        }
+      } catch(e) { console.log('OR Gemini image failed:', e.message); }
+    }
+
     console.error('All image providers failed for prompt:', prompt.slice(0, 80));
     return null;
   } finally {
@@ -3197,80 +3222,82 @@ async function testConnections() {
 // =============================================
 async function diagRenders() {
   const out = document.getElementById('diag-results');
-  out.innerHTML = '<div style="color:var(--gold);font-weight:600;margin-bottom:8px">🔍 Probando cada provider de imagen...</div>';
-  const hfKey = document.getElementById('hf-key-input').value.trim() || state.hfKey || localStorage.getItem('cayenabot_hf_key') || '';
-  const testPrompt = 'a simple white house with blue sky, test render';
+  out.innerHTML = '<div style="color:var(--gold);font-weight:600;margin-bottom:8px">🔍 Test de render con retry/backoff (como lo hace el sistema real)...</div>';
+  const testPrompt = 'a simple modern white house with blue sky and green lawn';
+
+  // Helper: fetch Pollinations with retry on 429
+  async function fetchWithRetry(url, maxRetries, row) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
+      if (r.status === 429) {
+        const wait = 3000 * Math.pow(2, attempt) + Math.random() * 1000;
+        row.innerHTML = `<span>🔄</span> <strong>Retry ${attempt+1}</strong>: rate limit 429, esperando ${(wait/1000).toFixed(0)}s...`;
+        await new Promise(resolve => setTimeout(resolve, wait));
+        continue;
+      }
+      return r;
+    }
+    throw new Error('429 persistente después de ' + maxRetries + ' reintentos');
+  }
 
   const tests = [
-    { name: 'HF FLUX.1-schnell', fn: async () => {
-      if (!hfKey) throw new Error('No HF token configurado');
-      const r = await fetch('https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell', {
-        method: 'POST', signal: AbortSignal.timeout(60000),
-        headers: { 'Authorization': `Bearer ${hfKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs: testPrompt, parameters: { num_inference_steps: 4, guidance_scale: 0, width: 512, height: 512 } })
-      });
-      if (!r.ok) { const t = await r.text().catch(()=>''); throw new Error(`HTTP ${r.status}: ${t.slice(0,200)}`); }
-      const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + ' bytes)');
-      return { size: blob.size, url: URL.createObjectURL(blob) };
-    }},
-    { name: 'HF SDXL-Lightning', fn: async () => {
-      if (!hfKey) throw new Error('No HF token configurado');
-      const r = await fetch('https://api-inference.huggingface.co/models/ByteDance/SDXL-Lightning', {
-        method: 'POST', signal: AbortSignal.timeout(60000),
-        headers: { 'Authorization': `Bearer ${hfKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs: testPrompt, parameters: { num_inference_steps: 4, width: 512, height: 512 } })
-      });
-      if (!r.ok) { const t = await r.text().catch(()=>''); throw new Error(`HTTP ${r.status}: ${t.slice(0,200)}`); }
-      const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + ' bytes)');
-      return { size: blob.size, url: URL.createObjectURL(blob) };
-    }},
-    { name: 'Pollinations.ai FLUX', fn: async () => {
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=flux&nologo=true&seed=12345`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(45000) });
+    { name: 'Pollinations FLUX (con retry)', fn: async (row) => {
+      const seed = Date.now();
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=flux&nologo=true&seed=${seed}`;
+      const r = await fetchWithRetry(url, 5, row);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + ' bytes, tipo: ' + blob.type + ')');
+      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + 'b, type: ' + blob.type + ')');
       return { size: blob.size, url: URL.createObjectURL(blob) };
     }},
-    { name: 'Pollinations.ai Turbo', fn: async () => {
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=turbo&nologo=true&seed=12345`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(45000) });
+    { name: 'Pollinations Turbo (con retry)', fn: async (row) => {
+      await new Promise(r => setTimeout(r, 3000)); // wait before second test
+      const seed = Date.now();
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=turbo&nologo=true&seed=${seed}`;
+      const r = await fetchWithRetry(url, 5, row);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + ' bytes, tipo: ' + blob.type + ')');
+      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + 'b, type: ' + blob.type + ')');
       return { size: blob.size, url: URL.createObjectURL(blob) };
     }},
-    { name: 'HF SDXL Base', fn: async () => {
-      if (!hfKey) throw new Error('No HF token configurado');
-      const r = await fetch('https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0', {
+    { name: 'OpenRouter Gemini (imagen)', fn: async (row) => {
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST', signal: AbortSignal.timeout(60000),
-        headers: { 'Authorization': `Bearer ${hfKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs: testPrompt, parameters: { num_inference_steps: 20, guidance_scale: 7.5, width: 512, height: 512 } })
+        headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href },
+        body: JSON.stringify({
+          model: 'google/gemini-2.0-flash-exp:free',
+          messages: [{ role: 'user', content: 'Generate an image of: ' + testPrompt }],
+          modalities: ['text', 'image']
+        })
       });
-      if (!r.ok) { const t = await r.text().catch(()=>''); throw new Error(`HTTP ${r.status}: ${t.slice(0,200)}`); }
-      const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + ' bytes)');
-      return { size: blob.size, url: URL.createObjectURL(blob) };
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const d = await resp.json();
+      const parts = d.choices?.[0]?.message?.content;
+      if (typeof parts === 'string') throw new Error('Solo texto, no imagen');
+      if (Array.isArray(parts)) {
+        const ip = parts.find(p => p.type === 'image_url' || p.inline_data);
+        if (ip?.image_url?.url) return { size: 0, url: ip.image_url.url };
+        if (ip?.inline_data?.data) return { size: ip.inline_data.data.length, url: `data:${ip.inline_data.mime_type||'image/png'};base64,${ip.inline_data.data}` };
+      }
+      throw new Error('Respuesta sin imagen: ' + JSON.stringify(parts).slice(0, 150));
     }}
   ];
 
   for (const test of tests) {
     const row = document.createElement('div');
-    row.style.cssText = 'padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px';
+    row.style.cssText = 'padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap';
     row.innerHTML = `<span>⏳</span> <strong>${test.name}</strong>: probando...`;
     out.appendChild(row);
     try {
       const t0 = Date.now();
-      const result = await test.fn();
+      const result = await test.fn(row);
       const ms = Date.now() - t0;
-      row.innerHTML = `<span>✅</span> <strong>${test.name}</strong>: OK — ${(result.size/1024).toFixed(0)}KB en ${(ms/1000).toFixed(1)}s <img src="${result.url}" style="width:40px;height:40px;border-radius:4px;object-fit:cover;margin-left:8px">`;
+      row.innerHTML = `<span>✅</span> <strong>${test.name}</strong>: OK — ${result.size > 0 ? (result.size/1024).toFixed(0)+'KB' : ''} ${(ms/1000).toFixed(1)}s <img src="${result.url}" style="width:60px;height:60px;border-radius:6px;object-fit:cover;margin-left:8px" onerror="this.style.display='none'">`;
     } catch(e) {
       row.innerHTML = `<span>❌</span> <strong>${test.name}</strong>: ${e.message}`;
     }
   }
-  out.innerHTML += '<div style="margin-top:8px;color:var(--muted);font-size:11px">Usa el primer provider con ✅ como referencia. Los renders del Swarm usarán automáticamente el que funcione.</div>';
+  out.innerHTML += '<div style="margin-top:8px;padding:8px;background:rgba(196,119,59,0.1);border-radius:8px;font-size:11px;color:var(--muted)">Si al menos 1 tiene ✅, los renders funcionarán. El sistema usa retry automático con espera exponencial.</div>';
 }
 
 // =============================================
