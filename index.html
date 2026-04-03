@@ -1054,44 +1054,17 @@ function refreshProjectList() {
     const sceneCount = Object.keys(p.scenes || {}).length;
     const date = p.savedAt ? new Date(p.savedAt).toLocaleDateString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
     const editor = p.lastEditedBy;
-    return `<div class="project-card" data-idx="${i}" style="display:flex;gap:14px;padding:14px 16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:10px;cursor:pointer;transition:all 0.15s" onmouseenter="this.style.borderColor='rgba(196,119,59,0.4)';this.style.background='rgba(255,255,255,0.04)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.05)';this.style.background='rgba(255,255,255,0.02)'">
-      ${editor ? `<div style="width:36px;height:36px;border-radius:8px;background:${editor.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;letter-spacing:0.5px;flex-shrink:0">${editor.id}</div>` : '<div style="width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg></div>'}
+    return `<div onclick="loadProject(${i})" style="display:flex;gap:14px;padding:14px 16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:10px;cursor:pointer;transition:all 0.15s" onmouseenter="this.style.borderColor='rgba(196,119,59,0.4)';this.style.background='rgba(255,255,255,0.04)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.05)';this.style.background='rgba(255,255,255,0.02)'">
+      ${editor ? `<div style="width:36px;height:36px;border-radius:8px;background:${editor.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;letter-spacing:0.5px;flex-shrink:0">${editor.id}</div>` : '<div style="width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,0.05);flex-shrink:0"></div>'}
       <div style="flex:1;min-width:0">
         <div style="font-size:14px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name || 'Sin nombre'}</div>
-        <div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:3px;display:flex;gap:8px;align-items:center">
-          ${p.location ? `<span>${p.location}</span><span style="opacity:0.3">·</span>` : ''}
-          <span>${imgCount} imgs</span><span style="opacity:0.3">·</span><span>${sceneCount} escenas</span>${date ? `<span style="opacity:0.3">·</span><span>${date}</span>` : ''}
-        </div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:3px">${imgCount} imgs · ${sceneCount} escenas${date ? ' · ' + date : ''}</div>
       </div>
-      <button class="proj-delete-btn" data-idx="${i}" style="background:none;border:none;color:rgba(224,80,80,0.5);font-size:16px;cursor:pointer;padding:4px;align-self:start" title="Eliminar">✕</button>
+      <button onclick="event.stopPropagation();deleteProject(${i})" style="background:none;border:none;color:rgba(224,80,80,0.4);font-size:14px;cursor:pointer;padding:6px;align-self:start">x</button>
     </div>`;
   }).join('');
 
-  // Make every project card clickable — multiple approaches for reliability
-  const cards = list.querySelectorAll('.project-card');
-  cards.forEach(card => {
-    // Method 1: onclick property
-    card.onclick = function(e) {
-      if (e.target.closest('.proj-delete-btn')) return;
-      const idx = parseInt(this.getAttribute('data-idx'));
-      if (!isNaN(idx)) loadProject(idx);
-    };
-    // Method 2: touchend for mobile
-    card.addEventListener('touchend', function(e) {
-      if (e.target.closest('.proj-delete-btn')) return;
-      const idx = parseInt(this.getAttribute('data-idx'));
-      if (!isNaN(idx)) {
-        e.preventDefault();
-        loadProject(idx);
-      }
-    }, { passive: false });
-  });
-  list.querySelectorAll('.proj-delete-btn').forEach(btn => {
-    btn.onclick = function(e) {
-      e.stopPropagation();
-      deleteProject(parseInt(this.getAttribute('data-idx')));
-    };
-  });
+  // onclick handlers are inline in the HTML above
 }
 
 function getAllSavedProjects() {
