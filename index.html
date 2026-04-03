@@ -942,10 +942,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <script>
 // Multi-user system
 const __USERS = [
-  { id: 'ISA', name: 'Isa', pass: '151202', color: '#e05090', initials: 'IS' },
-  { id: 'JAG', name: 'Jag', pass: '121174', color: '#c4773b', initials: 'JG' },
-  { id: 'PAM', name: 'Pam', pass: '260572', color: '#5b8def', initials: 'PM' },
-  { id: 'ALV', name: 'Alv', pass: '221297', color: '#10b981', initials: 'AL' }
+  { id: 'ISA', name: 'Isa', pass: '151202', color: '#e05090', initials: 'IS', emoji: '🩷' },
+  { id: 'JAG', name: 'Jag', pass: '121174', color: '#c4773b', initials: 'JG', emoji: '🧱' },
+  { id: 'PAM', name: 'Pam', pass: '260572', color: '#5b8def', initials: 'PM', emoji: '💙' },
+  { id: 'ALV', name: 'Alv', pass: '221297', color: '#10b981', initials: 'AL', emoji: '💚' }
 ];
 
 let __selectedUser = null;
@@ -991,7 +991,7 @@ function doLogin() {
 
   if (pass === __selectedUser.pass) {
     __currentUser = __selectedUser;
-    state.__user = { id: __currentUser.id, name: __currentUser.name, color: __currentUser.color, emoji: __currentUser.emoji };
+    state.__user = { id: __currentUser.id, name: __currentUser.name, color: __currentUser.color, emoji: __currentUser.emoji || '👤' };
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('project-selector').style.display = '';
     refreshProjectList();
@@ -1000,7 +1000,7 @@ function doLogin() {
     const badge = document.getElementById('user-badge');
     if (badge) {
       badge.style.background = __currentUser.color;
-      badge.textContent = __currentUser.emoji;
+      badge.textContent = __currentUser.emoji || __currentUser.initials || '👤';
       badge.style.display = 'flex';
       badge.title = `${__currentUser.name} (${__currentUser.id}) — Click para cambiar usuario`;
     }
@@ -2841,7 +2841,7 @@ const state = {
   projectName: '',
   projectLocation: '',
   chatHistory: [],
-  orKey: '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',
+  orKey: '',
   hfKey: '',
   togetherKey: '',
   localSdUrl: '',
@@ -4407,7 +4407,10 @@ async function sendChat() {
         if (resp.status === 401 || resp.status === 403) {
           if (prov.type !== 'openrouter') continue; // skip auth errors on non-primary
           removeEl(thinkEl);
-          addMsg('assistant', `⚠️ <strong>Error de autenticación:</strong> ${lastError}`);
+          const authMsg = /user not found/i.test(lastError)
+            ? 'La API key de OpenRouter es inválida o fue revocada. Abre ⚙️ Configuración y pega una key vigente.'
+            : lastError;
+          addMsg('assistant', `⚠️ <strong>Error de autenticación:</strong> ${authMsg}`);
           return;
         }
         continue;
@@ -4495,7 +4498,8 @@ function addMsg(role, text) {
   const d = document.createElement('div');
   d.className = `msg msg-${role} fade-enter`;
   // Tag user messages with the current user's color and name
-  const userTag = (role === 'user' && __currentUser) ? `<span style="display:inline-block;background:${__currentUser.color};color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle">${__currentUser.emoji} ${__currentUser.id}</span>` : '';
+  const userEmoji = __currentUser?.emoji || '👤';
+  const userTag = (role === 'user' && __currentUser) ? `<span style="display:inline-block;background:${__currentUser.color};color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle">${userEmoji} ${__currentUser.id}</span>` : '';
   d.innerHTML = `<div class="msg-bubble">${userTag}${text.replace(/\n/g,'<br>')}</div>`;
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
