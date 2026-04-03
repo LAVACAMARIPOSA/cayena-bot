@@ -846,6 +846,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
 <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+<!-- Photo Sphere Viewer (advanced immersive tour) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5/index.min.css">
+<script src="https://cdn.jsdelivr.net/npm/three@0.165/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/markers-plugin@5/index.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/markers-plugin@5/index.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/virtual-tour-plugin@5/index.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/virtual-tour-plugin@5/index.min.css">
 </head>
 <body>
 
@@ -1197,11 +1205,14 @@ function deleteProject(idx) {
       </div>
 
       <!-- View mode toggle + camera -->
-      <div style="position:absolute;top:16px;left:16px;z-index:25;display:flex;gap:6px">
-        <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:var(--gold);color:#fff;border:none">🌐 Tour 360°</button>
-        <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🖼️ Galería</button>
-        <button onclick="openCameraCapture()" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">📷 Capturar</button>
+      <div style="position:absolute;top:16px;left:16px;z-index:25;display:flex;gap:4px;flex-wrap:wrap">
+        <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:var(--gold);color:#fff;border:none">🌐 360°</button>
+        <button id="tour-mode-psv" onclick="setTourMode('psv')" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🏠 Inmersivo</button>
+        <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">🖼️ Galería</button>
+        <button onclick="openCameraCapture()" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(8px)">📷</button>
       </div>
+      <!-- Photo Sphere Viewer container -->
+      <div id="psv-container" style="position:absolute;inset:0;z-index:1;display:none"></div>
 
       <!-- Minimap dots -->
       <div id="minimap"></div>
@@ -2982,20 +2993,28 @@ function setTourMode(mode) {
   __tourMode = mode;
   const flatViewer = document.getElementById('tour-flat-viewer');
   const pannContainer = document.getElementById('pannellum-container');
+  const psvContainer = document.getElementById('psv-container');
   const btnFlat = document.getElementById('tour-mode-flat');
   const btn360 = document.getElementById('tour-mode-360');
+  const btnPsv = document.getElementById('tour-mode-psv');
+  const inactiveStyle = 'rgba(0,0,0,0.5)';
+
+  // Reset all
+  [flatViewer, pannContainer, psvContainer].forEach(el => { if(el) el.style.display = 'none'; });
+  [btnFlat, btn360, btnPsv].forEach(btn => { if(btn) { btn.style.background = inactiveStyle; btn.style.border = '1px solid rgba(255,255,255,0.3)'; }});
 
   if (mode === 'flat') {
     flatViewer.style.display = 'flex';
-    pannContainer.style.display = 'none';
     btnFlat.style.background = 'var(--gold)'; btnFlat.style.border = 'none';
-    btn360.style.background = 'rgba(0,0,0,0.5)'; btn360.style.border = '1px solid rgba(255,255,255,0.3)';
     updateFlatTour();
+  } else if (mode === 'psv') {
+    psvContainer.style.display = '';
+    btnPsv.style.background = 'var(--gold)'; btnPsv.style.border = 'none';
+    if (!__psvViewer) initPSVTour();
   } else {
-    flatViewer.style.display = 'none';
+    // 360 (Pannellum)
     pannContainer.style.display = '';
     btn360.style.background = 'var(--gold)'; btn360.style.border = 'none';
-    btnFlat.style.background = 'rgba(0,0,0,0.5)'; btnFlat.style.border = '1px solid rgba(255,255,255,0.3)';
     if (!__pannellumViewer) initPannellumTour();
   }
 }
@@ -3210,6 +3229,128 @@ function tourFlatNav(dir) {
 const __origGoToScene = typeof goToScene === 'function' ? goToScene : null;
 
 // =============================================
+// =============================================
+// PHOTO SPHERE VIEWER (Immersive mode with virtual tour plugin)
+// =============================================
+let __psvViewer = null;
+
+function initPSVTour() {
+  const container = document.getElementById('psv-container');
+  if (!container || typeof PhotoSphereViewer === 'undefined') return false;
+
+  const sceneKeys = Object.keys(SCENES);
+  if (sceneKeys.length === 0) return false;
+
+  // Destroy existing
+  if (__psvViewer) { try { __psvViewer.destroy(); } catch(e) {} __psvViewer = null; }
+
+  // Build nodes and links for virtual tour
+  const nodes = [];
+  const links = [];
+
+  sceneKeys.forEach((k, i) => {
+    const s = SCENES[k];
+    const imgSrc = IMG[s.img]?.src || '';
+    if (!imgSrc) return;
+
+    const node = {
+      id: k,
+      panorama: imgSrc,
+      name: s.label || `Escena ${i + 1}`,
+      markers: []
+    };
+
+    // Add navigation markers from scene.nav
+    const angles = { n: 0, e: Math.PI / 2, s: Math.PI, w: -Math.PI / 2 };
+    Object.entries(s.nav || {}).forEach(([dir, target]) => {
+      if (!target || !SCENES[target]) return;
+      const targetLabel = SCENES[target].label?.split('—').pop()?.trim() || 'Ir';
+      node.markers.push({
+        id: `nav-${k}-${dir}`,
+        tooltip: `🚶 ${targetLabel}`,
+        content: `<div style="background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid rgba(196,119,59,0.8);backdrop-filter:blur(8px)">🚶 ${targetLabel}</div>`,
+        position: { yaw: angles[dir] || 0, pitch: -0.2 },
+        html: true
+      });
+      links.push({ nodeId: k, targetId: target });
+    });
+
+    // If no nav links, link to next/prev
+    if (Object.values(s.nav || {}).filter(Boolean).length === 0) {
+      if (i < sceneKeys.length - 1) {
+        const nextKey = sceneKeys[i + 1];
+        const nextLabel = SCENES[nextKey]?.label?.split('—').pop()?.trim() || 'Siguiente';
+        node.markers.push({
+          id: `nav-${k}-next`,
+          tooltip: `🚶 ${nextLabel}`,
+          content: `<div style="background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid rgba(196,119,59,0.8)">🚶 ${nextLabel}</div>`,
+          position: { yaw: Math.PI / 4, pitch: -0.15 },
+          html: true
+        });
+        links.push({ nodeId: k, targetId: nextKey });
+      }
+    }
+
+    nodes.push(node);
+  });
+
+  if (nodes.length === 0) return false;
+
+  const firstId = state.currentScene && nodes.find(n => n.id === state.currentScene) ? state.currentScene : nodes[0].id;
+
+  try {
+    const PSV = PhotoSphereViewer;
+    __psvViewer = new PSV.Viewer({
+      container: container,
+      panorama: nodes.find(n => n.id === firstId)?.panorama || nodes[0].panorama,
+      caption: nodes.find(n => n.id === firstId)?.name || '',
+      defaultYaw: 0,
+      defaultPitch: 0,
+      minFov: 30,
+      maxFov: 90,
+      defaultZoomLvl: 50,
+      navbar: false,
+      loadingTxt: 'Cargando tour...',
+      touchmoveTwoFingers: false,
+      mousewheelCtrlKey: false,
+      plugins: [
+        [PSV.MarkersPlugin, { markers: nodes.find(n => n.id === firstId)?.markers || [] }],
+        [PSV.VirtualTourPlugin, {
+          positionMode: 'manual',
+          renderMode: '3d',
+          nodes: nodes.map(n => ({
+            id: n.id,
+            panorama: n.panorama,
+            name: n.name,
+            links: links.filter(l => l.nodeId === n.id).map(l => ({
+              nodeId: l.targetId,
+              position: { textureX: 2000, textureY: 1000 }
+            }))
+          })),
+          startNodeId: firstId
+        }]
+      ]
+    });
+
+    // Listen for node changes
+    const vtPlugin = __psvViewer.getPlugin(PSV.VirtualTourPlugin);
+    if (vtPlugin) {
+      vtPlugin.addEventListener('node-changed', (e) => {
+        state.currentScene = e.node.id;
+        state.visited.add(e.node.id);
+        updateMinimap();
+        buildThumbstrip();
+      });
+    }
+
+    document.getElementById('tour-empty').style.display = 'none';
+    return true;
+  } catch(e) {
+    console.log('PSV init error:', e.message, e);
+    return false;
+  }
+}
+
 // PANNELLUM TOUR ENGINE (360° mode)
 // =============================================
 let __pannellumViewer = null;
@@ -3261,7 +3402,7 @@ function initPannellumTour() {
       hfov: 110,
       minHfov: 50,
       maxHfov: 120,
-      autoRotate: -0.8,
+      autoRotate: -0.3,
       autoRotateInactivityDelay: 3000
     };
   });
@@ -3280,14 +3421,18 @@ function initPannellumTour() {
     __pannellumViewer = pannellum.viewer('pannellum-container', {
       default: {
         firstScene: firstScene,
-        sceneFadeDuration: 1500,
+        sceneFadeDuration: 2000,
         autoLoad: true,
-        showFullscreenCtrl: false,
-        showZoomCtrl: false,
+        showFullscreenCtrl: true,
+        showZoomCtrl: true,
         compass: true,
         mouseZoom: true,
         draggable: true,
-        friction: 0.15
+        keyboardZoom: true,
+        friction: 0.12,
+        minHfov: 40,
+        maxHfov: 120,
+        hfov: 100
       },
       scenes: pScenes
     });

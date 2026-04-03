@@ -1,7 +1,7 @@
 # 🏗️ CayenaBot — AI PropTech Builder
 ## Roadmap & Estado del Proyecto
 
-> **85 commits** | Single-file HTML app | Deployed on Render.com
+> **90+ commits** | Single-file HTML app | Deployed on Render.com
 > **Repositorio:** github.com/lavacamariposa/cayena-bot
 
 ---
@@ -89,7 +89,10 @@ CayenaBot es una herramienta AI para empresas de real estate que genera automát
 - [x] Auto-sugerencia de swarm cuando la tarea lo necesita
 
 ### 🧭 Tour Virtual
-- [x] Pannellum.js para modo 360° (panoramas equirectangulares)
+- [x] **3 modos de tour:**
+  - 🌐 **360° (Pannellum)** — Panoramas equirectangulares con hotspots
+  - 🏠 **Inmersivo (Photo Sphere Viewer)** — Tour virtual con marcadores 3D y virtual tour plugin
+  - 🖼️ **Galería (Flat)** — Slideshow cinematográfico con Ken Burns
 - [x] Vista plana con Ken Burns cinematográfico (zoom+pan automático)
 - [x] Transiciones "walking" con dolly zoom + blur + fade
 - [x] Hotspots animados estilo Matterport (🚶 con pulso dorado)
