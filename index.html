@@ -428,6 +428,25 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 #chat-input-area{
   padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;
 }
+#chat-attachments{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+#chat-attachments:empty{display:none}
+.chat-attach-thumb{
+  position:relative;width:60px;height:60px;border-radius:8px;overflow:hidden;
+  border:1px solid var(--border);
+}
+.chat-attach-thumb img{width:100%;height:100%;object-fit:cover}
+.chat-attach-remove{
+  position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;
+  background:rgba(0,0,0,0.7);color:#fff;border:none;font-size:11px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+#chat-attach-btn{
+  width:38px;height:38px;border-radius:10px;border:1px solid var(--border);
+  background:var(--card);color:var(--muted);cursor:pointer;font-size:16px;
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  transition:all 0.2s;
+}
+#chat-attach-btn:hover{color:var(--gold);border-color:var(--gold)}
 #chat-form{display:flex;gap:8px;align-items:flex-end}
 #chat-input{
   flex:1;background:var(--card);border:1px solid var(--border);
@@ -997,8 +1016,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <span class="suggest-chip" onclick="sendSuggestion(this)">🚀 Lanzar 100 agentes</span>
     </div>
     <div id="chat-input-area">
+      <div id="chat-attachments"></div>
       <div id="chat-form">
-        <textarea id="chat-input" placeholder="Escribe tu pregunta..." rows="1" onkeydown="chatKeydown(event)"></textarea>
+        <label id="chat-attach-btn" title="Adjuntar imagen o archivo">
+          📎
+          <input type="file" id="chat-file-input" accept="image/*,.pdf,.dwg,.dxf,.zip,.skp,.fbx,.obj,.gltf,.glb" multiple style="display:none" onchange="handleChatFileAttach(this.files);this.value=''">
+        </label>
+        <textarea id="chat-input" placeholder="Escribe tu pregunta o pega una imagen (Ctrl+V)..." rows="1" onkeydown="chatKeydown(event)"></textarea>
         <button id="chat-send" onclick="sendChat()">➤</button>
       </div>
       <button id="chat-render-btn" onclick="openRenderModal()">✨ Generar render AI de este espacio</button>
@@ -1614,7 +1638,8 @@ const state = {
   renderResultData: null,
   lightboxIdx: 0,
   chatOpen: false,
-  transitioning: false
+  transitioning: false,
+  pendingImages: []  // base64 images waiting to be sent with next message
 };
 
 const SYSTEM_PROMPT = `Eres CayenaBot, un asistente AI especializado en crear contenido inmobiliario profesional con renders hiperrealistas ricos en materiales, mobiliario y detalles arquitectónicos reales.
@@ -2124,6 +2149,74 @@ function chatKeydown(e) {
   }
 }
 
+// =============================================
+// MULTIMODAL — IMAGE UPLOAD TO CHAT
+// =============================================
+function handleChatFileAttach(files) {
+  Array.from(files).forEach(file => {
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => addPendingImage(e.target.result, file.name);
+      reader.readAsDataURL(file);
+    } else {
+      // Non-image files: process normally
+      handleFileUpload([file]);
+    }
+  });
+}
+
+function addPendingImage(base64, fileName) {
+  state.pendingImages.push({ data: base64, name: fileName || 'image' });
+  updateAttachmentPreviews();
+}
+
+function removePendingImage(idx) {
+  state.pendingImages.splice(idx, 1);
+  updateAttachmentPreviews();
+}
+
+function updateAttachmentPreviews() {
+  const container = document.getElementById('chat-attachments');
+  container.innerHTML = state.pendingImages.map((img, i) =>
+    `<div class="chat-attach-thumb">
+      <img src="${img.data}" alt="${img.name}">
+      <button class="chat-attach-remove" onclick="removePendingImage(${i})">✕</button>
+    </div>`
+  ).join('');
+}
+
+// Paste handler — Ctrl+V images directly into chat
+document.addEventListener('paste', (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = (ev) => addPendingImage(ev.target.result, 'pasted-image.png');
+      reader.readAsDataURL(file);
+    }
+  }
+});
+
+// Build OpenRouter multimodal message content
+function buildMessageContent(text, images) {
+  if (!images || images.length === 0) {
+    return text;
+  }
+  // Multimodal format for OpenRouter/OpenAI vision
+  const parts = [];
+  images.forEach(img => {
+    parts.push({
+      type: 'image_url',
+      image_url: { url: img.data }
+    });
+  });
+  parts.push({ type: 'text', text: text || 'Analiza esta imagen. Si es un plano arquitectónico, describe la distribución, metraje estimado, y sugiere materiales y renders.' });
+  return parts;
+}
+
 function sendSuggestion(el) {
   document.getElementById('chat-input').value = el.textContent;
   sendChat();
@@ -2132,13 +2225,27 @@ function sendSuggestion(el) {
 async function sendChat() {
   const inp = document.getElementById('chat-input');
   const text = inp.value.trim();
-  if (!text) return;
-  
+  const images = [...state.pendingImages];
+  if (!text && images.length === 0) return;
+
   inp.value = '';
   inp.style.height = 'auto';
-  
-  addMsg('user', text);
-  state.chatHistory.push({role:'user', content: text});
+  state.pendingImages = [];
+  updateAttachmentPreviews();
+
+  // Show user message with image previews
+  const imgPreviews = images.map(img => `<img src="${img.data}" style="max-width:200px;max-height:150px;border-radius:8px;margin:4px 2px;display:inline-block">`).join('');
+  addMsg('user', (text || '') + (imgPreviews ? '<br>' + imgPreviews : ''));
+
+  // Build multimodal content for API
+  const msgContent = buildMessageContent(text || 'Analiza estas imágenes del proyecto.', images.length > 0 ? images : null);
+  state.chatHistory.push({role:'user', content: msgContent});
+
+  // Also add images to gallery
+  images.forEach(img => {
+    const label = img.name.replace(/\.\w+$/, '').replace(/[_-]/g, ' ') || 'Imagen subida';
+    addRenderToGallery(img.data, label);
+  });
   
   // Swarm activation: detect "100 agentes", "swarm", "ruflo", "desplegar agentes"
   const swarmKeywords = /(?:100\s*agentes|swarm|ruflo|desplegar\s*agentes|genera(?:r)?\s+(?:todo|el\s+proyecto|proyecto\s+completo)|lanzar\s+agentes)/i;
@@ -2400,6 +2507,24 @@ function downloadChatRender(btn) {
 document.getElementById('chat-input').addEventListener('input', function() {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// Drag-drop images directly onto chat input
+const chatArea = document.getElementById('chat-input-area');
+chatArea.addEventListener('dragover', (e) => { e.preventDefault(); chatArea.style.borderColor = 'var(--gold)'; });
+chatArea.addEventListener('dragleave', () => { chatArea.style.borderColor = ''; });
+chatArea.addEventListener('drop', (e) => {
+  e.preventDefault(); e.stopPropagation(); chatArea.style.borderColor = '';
+  const files = e.dataTransfer.files;
+  if (files.length) {
+    Array.from(files).forEach(f => {
+      if (f.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (ev) => addPendingImage(ev.target.result, f.name);
+        reader.readAsDataURL(f);
+      } else { handleFileUpload([f]); }
+    });
+  }
 });
 
 // =============================================
@@ -3108,9 +3233,14 @@ function handleFileUpload(files) {
 function processImageUpload(file, label) {
   const reader = new FileReader();
   reader.onload = (e) => {
-    addRenderToGallery(e.target.result, label);
-    addMsg('assistant', '🖼️ <strong>' + label + '</strong> agregada a la galería. <button onclick="addToTour(\\\'' + e.target.result.slice(0,50) + '...\\\', \\\'' + label + '\\\')" class="chat-render-btn">🧭 Agregar al Tour</button>');
-    showToast('🖼️ ' + label + ' agregada');
+    const base64 = e.target.result;
+    addRenderToGallery(base64, label);
+
+    // Add to pending images so AI can analyze it
+    addPendingImage(base64, label);
+
+    addMsg('assistant', `🖼️ <strong>${label}</strong> agregada a la galería y lista para análisis.<br><img src="${base64}" style="max-width:300px;border-radius:8px;margin:8px 0"><br>Escribe un mensaje para que el AI analice la imagen (ej: "analiza este plano" o "genera renders basados en esto").`);
+    showToast('🖼️ ' + label + ' — lista para análisis AI');
   };
   reader.readAsDataURL(file);
 }
