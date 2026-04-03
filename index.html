@@ -623,13 +623,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* Matterport-style hotspot with walking pulse */
 .cayena-hotspot{
   background:rgba(0,0,0,0.7)!important;border:2px solid rgba(255,255,255,0.9)!important;
-  border-radius:24px!important;padding:8px 18px!important;
-  color:#fff!important;font-size:13px!important;font-weight:700!important;
+  border-radius:24px!important;padding:6px 14px!important;
+  color:#fff!important;font-size:12px!important;font-weight:600!important;
   backdrop-filter:blur(10px);transition:all 0.3s!important;cursor:pointer!important;
   box-shadow:0 4px 20px rgba(0,0,0,0.5),0 0 0 0 rgba(196,119,59,0.4)!important;
   animation:hotspotPulse 2.5s ease-in-out infinite!important;
+  max-width:160px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;
 }
-.cayena-hotspot::before{content:'🚶 ';font-size:14px}
+.cayena-hotspot::before{content:'→ ';font-size:12px}
 .cayena-hotspot:hover{
   background:rgba(196,119,59,0.9)!important;border-color:var(--gold)!important;
   transform:scale(1.15)!important;animation:none!important;
@@ -1009,21 +1010,26 @@ function refreshProjectList() {
     </div>`;
   }).join('');
 
-  // Event delegation for project cards (avoids inline onclick issues with base64)
-  list.querySelectorAll('.project-card').forEach(card => {
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.proj-delete-btn')) return;
-      const idx = parseInt(card.dataset.idx);
-      if (!isNaN(idx)) loadProject(idx);
-    });
-  });
-  list.querySelectorAll('.proj-delete-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+  // Single event listener on the list container for delegation
+  list.onclick = function(e) {
+    // Delete button
+    const delBtn = e.target.closest('.proj-delete-btn');
+    if (delBtn) {
       e.stopPropagation();
-      const idx = parseInt(btn.dataset.idx);
+      const idx = parseInt(delBtn.dataset.idx);
       if (!isNaN(idx)) deleteProject(idx);
-    });
-  });
+      return;
+    }
+    // Project card click
+    const card = e.target.closest('.project-card');
+    if (card) {
+      const idx = parseInt(card.dataset.idx);
+      if (!isNaN(idx)) {
+        console.log('Loading project index:', idx);
+        loadProject(idx);
+      }
+    }
+  };
 }
 
 function getAllSavedProjects() {
@@ -3090,7 +3096,8 @@ function updateFlatTour() {
   document.getElementById('tour-counter').textContent = `${__flatTourIdx + 1} / ${keys.length}`;
 
   // Update scene info with next destination hint
-  document.getElementById('scene-label').textContent = scene.label || '';
+  const sceneTitle = (scene.label || '').length > 40 ? scene.label.slice(0, 38) + '…' : scene.label || '';
+  document.getElementById('scene-label').textContent = sceneTitle;
   const nextKey = keys[__flatTourIdx + 1];
   const nextLabel = nextKey ? SCENES[nextKey]?.label?.split('—').pop()?.trim() : '';
   const prevKey = keys[__flatTourIdx - 1];
@@ -3245,13 +3252,21 @@ let __psvViewer = null;
 
 function initPSVTour() {
   const container = document.getElementById('psv-container');
-  if (!container || typeof PhotoSphereViewer === 'undefined') return false;
+  if (!container) return false;
+
+  // Check if PhotoSphereViewer loaded correctly
+  const PSV = window.PhotoSphereViewer;
+  if (!PSV || !PSV.Viewer) {
+    console.log('PSV not loaded, falling back to Pannellum');
+    return false;
+  }
 
   const sceneKeys = Object.keys(SCENES);
   if (sceneKeys.length === 0) return false;
 
   // Destroy existing
   if (__psvViewer) { try { __psvViewer.destroy(); } catch(e) {} __psvViewer = null; }
+  container.innerHTML = ''; // Clear container
 
   // Build nodes and links for virtual tour
   const nodes = [];
@@ -3273,7 +3288,8 @@ function initPSVTour() {
     const angles = { n: 0, e: Math.PI / 2, s: Math.PI, w: -Math.PI / 2 };
     Object.entries(s.nav || {}).forEach(([dir, target]) => {
       if (!target || !SCENES[target]) return;
-      const targetLabel = SCENES[target].label?.split('—').pop()?.trim() || 'Ir';
+      const rawLabel = SCENES[target].label?.split('—').pop()?.trim() || 'Ir';
+      const targetLabel = rawLabel.length > 18 ? rawLabel.slice(0, 16) + '…' : rawLabel;
       node.markers.push({
         id: `nav-${k}-${dir}`,
         tooltip: `🚶 ${targetLabel}`,
@@ -3308,54 +3324,33 @@ function initPSVTour() {
   const firstId = state.currentScene && nodes.find(n => n.id === state.currentScene) ? state.currentScene : nodes[0].id;
 
   try {
-    const PSV = PhotoSphereViewer;
+    const firstNode = nodes.find(n => n.id === firstId) || nodes[0];
+
+    // Simple PSV viewer — just show the panorama with basic controls
     __psvViewer = new PSV.Viewer({
       container: container,
-      panorama: nodes.find(n => n.id === firstId)?.panorama || nodes[0].panorama,
-      caption: nodes.find(n => n.id === firstId)?.name || '',
+      panorama: firstNode.panorama,
+      caption: firstNode.name,
       defaultYaw: 0,
       defaultPitch: 0,
       minFov: 30,
       maxFov: 90,
       defaultZoomLvl: 50,
-      navbar: false,
-      loadingTxt: 'Cargando tour...',
+      navbar: ['zoom', 'fullscreen', 'caption'],
+      loadingTxt: 'Cargando...',
       touchmoveTwoFingers: false,
-      mousewheelCtrlKey: false,
-      plugins: [
-        [PSV.MarkersPlugin, { markers: nodes.find(n => n.id === firstId)?.markers || [] }],
-        [PSV.VirtualTourPlugin, {
-          positionMode: 'manual',
-          renderMode: '3d',
-          nodes: nodes.map(n => ({
-            id: n.id,
-            panorama: n.panorama,
-            name: n.name,
-            links: links.filter(l => l.nodeId === n.id).map(l => ({
-              nodeId: l.targetId,
-              position: { textureX: 2000, textureY: 1000 }
-            }))
-          })),
-          startNodeId: firstId
-        }]
-      ]
+      mousewheelCtrlKey: false
     });
 
-    // Listen for node changes
-    const vtPlugin = __psvViewer.getPlugin(PSV.VirtualTourPlugin);
-    if (vtPlugin) {
-      vtPlugin.addEventListener('node-changed', (e) => {
-        state.currentScene = e.node.id;
-        state.visited.add(e.node.id);
-        updateMinimap();
-        buildThumbstrip();
-      });
-    }
+    // Store nodes for manual navigation
+    state.__psvNodes = nodes;
+    state.__psvCurrentIdx = nodes.indexOf(firstNode);
 
     document.getElementById('tour-empty').style.display = 'none';
     return true;
   } catch(e) {
     console.log('PSV init error:', e.message, e);
+    container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted)"><p>⚠️ Modo inmersivo no disponible</p><p style="font-size:12px">Error: ${e.message}</p><button onclick="setTourMode('360')" style="margin-top:10px;padding:8px 16px;background:var(--gold);color:#fff;border:none;border-radius:8px;cursor:pointer">Usar modo 360°</button></div>`;
     return false;
   }
 }
@@ -3388,7 +3383,8 @@ function initPannellumTour() {
     const angles = { n: 0, e: 90, s: 180, w: -90 };
     Object.entries(s.nav || {}).forEach(([dir, target]) => {
       if (!target || !SCENES[target]) return;
-      const targetLabel = SCENES[target].label?.split('—').pop()?.trim() || 'Ir';
+      const rawLabel = SCENES[target].label?.split('—').pop()?.trim() || 'Ir';
+      const targetLabel = rawLabel.length > 18 ? rawLabel.slice(0, 16) + '…' : rawLabel;
       hotSpots.push({
         pitch: -10,
         yaw: angles[dir] || 0,
@@ -5269,7 +5265,7 @@ function decomposeProjectTasks(projectInfo) {
   ];
   exteriorScenes.slice(0, maxExterior).forEach((s, i) => {
     tasks.push({ id: id++, type: 'render', name: `Render Ext ${i+1}`, task: s.task, taskFn: 'render',
-      prompt: `equirectangular projection, 360 degree VR panorama, ${s.prompt}, ${name}, ${location}${locPrompt}${styleDNA}, seamless spherical panorama, continuous wrap-around view showing all directions, fisheye lens distortion at top and bottom, straight horizon line in the center, photorealistic architectural visualization, ultra high quality, 8K, professional photography, cinematic lighting, no text no watermark, 2:1 aspect ratio` });
+      prompt: `${name} in ${location}, ${styleDNA || style + ' architecture'}, ${s.prompt}${locPrompt}, equirectangular 360 panorama, seamless spherical, photorealistic, 8K, cinematic lighting, no text no watermark` });
   });
 
   // Render agents — per unit type interiors (19-58)
@@ -5293,7 +5289,7 @@ function decomposeProjectTasks(projectInfo) {
   unitTypes.forEach(unit => {
     prioritizedScenes.forEach((s, i) => {
       tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,6)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
-        prompt: `equirectangular projection, 360 degree VR interior panorama, ${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}${locPrompt}${styleDNA}, seamless spherical interior panorama, continuous wrap-around room view showing all walls floor and ceiling, fisheye lens distortion at top and bottom, straight horizon line in center, photorealistic interior visualization, ultra high quality, 8K, professional photography, warm cinematic lighting, no text no watermark, 2:1 aspect ratio` });
+        prompt: `${name} in ${location}, ${styleDNA || style + ' architecture'}, ${unit.toLowerCase()} ${s.task.toLowerCase()}, ${s.prompt}${locPrompt}, equirectangular 360 interior panorama, seamless spherical, photorealistic, 8K, warm cinematic lighting, no text no watermark` });
     });
   });
 
