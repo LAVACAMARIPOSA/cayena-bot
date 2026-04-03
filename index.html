@@ -179,6 +179,41 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 }
 .mm-dot:hover .mm-label{opacity:1}
 
+/* Matterport-style thumbnail strip */
+#tour-thumbstrip{
+  position:absolute;bottom:0;left:0;right:0;z-index:25;
+  background:linear-gradient(to top,rgba(0,0,0,0.85),rgba(0,0,0,0.4),transparent);
+  padding:40px 16px 12px;
+  display:flex;gap:8px;
+  overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:thin;scrollbar-color:rgba(196,119,59,0.5) transparent;
+}
+#tour-thumbstrip::-webkit-scrollbar{height:4px}
+#tour-thumbstrip::-webkit-scrollbar-thumb{background:rgba(196,119,59,0.5);border-radius:2px}
+.tour-thumb{
+  flex-shrink:0;width:100px;height:60px;
+  border-radius:8px;overflow:hidden;cursor:pointer;
+  border:2px solid transparent;
+  transition:all 0.3s ease;position:relative;
+  opacity:0.7;
+}
+.tour-thumb:hover{opacity:1;transform:translateY(-4px);border-color:rgba(255,255,255,0.5)}
+.tour-thumb.active{opacity:1;border-color:var(--gold);box-shadow:0 0 12px rgba(196,119,59,0.5)}
+.tour-thumb img{width:100%;height:100%;object-fit:cover}
+.tour-thumb-label{
+  position:absolute;bottom:0;left:0;right:0;
+  background:linear-gradient(transparent,rgba(0,0,0,0.8));
+  color:#fff;font-size:8px;font-weight:600;
+  padding:8px 4px 3px;text-align:center;
+  letter-spacing:0.02em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.tour-thumb-count{
+  position:absolute;top:3px;right:4px;
+  background:rgba(196,119,59,0.9);color:#fff;
+  font-size:8px;font-weight:700;padding:1px 4px;border-radius:4px;
+}
+
 /* ============ GALLERY ============ */
 #gallery-view{overflow-y:auto;padding:28px}
 #gallery-view::-webkit-scrollbar{width:6px}
@@ -838,6 +873,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
       <!-- Minimap dots -->
       <div id="minimap"></div>
+
+      <!-- Matterport-style thumbnail strip -->
+      <div id="tour-thumbstrip"></div>
     </div>
 
     <!-- GALLERY -->
@@ -2048,11 +2086,36 @@ function updateMinimap() {
   mm.innerHTML = Object.values(SCENES).map(s => {
     const isActive = s.key === state.currentScene;
     const isVisited = state.visited.has(s.key);
-    return `<div class="mm-dot ${isActive?'active':isVisited?'visited':''}" 
+    return `<div class="mm-dot ${isActive?'active':isVisited?'visited':''}"
       onclick="goToScene('${s.key}')" title="${s.label}">
       <span class="mm-label">${s.label}</span>
     </div>`;
   }).join('');
+  buildThumbstrip();
+}
+
+function buildThumbstrip() {
+  const strip = document.getElementById('tour-thumbstrip');
+  if (!strip) return;
+  const scenes = Object.values(SCENES);
+  if (scenes.length === 0) { strip.innerHTML = ''; return; }
+  const idx = scenes.findIndex(s => s.key === state.currentScene);
+  strip.innerHTML = scenes.map((s, i) => {
+    const imgSrc = IMG[s.img]?.src || '';
+    const isActive = s.key === state.currentScene;
+    const shortLabel = s.label.split('—').pop().trim();
+    const displayLabel = shortLabel.length > 14 ? shortLabel.slice(0,13) + '…' : shortLabel;
+    return `<div class="tour-thumb ${isActive ? 'active' : ''}" onclick="goToScene('${s.key}')" title="${s.label}">
+      <img src="${imgSrc}" alt="${s.label}" onerror="this.parentElement.style.background='var(--card)'">
+      <div class="tour-thumb-label">${displayLabel}</div>
+      <div class="tour-thumb-count">${i + 1}</div>
+    </div>`;
+  }).join('');
+  // Auto-scroll to active thumbnail
+  if (idx >= 0) {
+    const activeThumb = strip.children[idx];
+    if (activeThumb) activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }
 }
 
 // Keyboard navigation
@@ -2822,32 +2885,131 @@ function addRenderToGallery(src, label) {
   buildGallery();
 }
 
-function addToTour(src, label) {
-  const key = 'gen_tour_' + Date.now();
-  IMG[key] = { src, label };
+// Detect floor/zone from label for intelligent tour navigation
+function __detectFloorZone(label) {
+  const l = label.toLowerCase();
+  // Floor detection
+  let floor = 1;
+  if (/second|2nd|segundo|piso\s*2|planta\s*(alta|2)|upper/i.test(l)) floor = 2;
+  if (/third|3rd|tercer|piso\s*3|planta\s*3/i.test(l)) floor = 3;
+  if (/rooftop|azotea|terraza\s*(superior|alta)|roof/i.test(l)) floor = 9;
+  if (/basement|sótano|subterr/i.test(l)) floor = 0;
+  // Zone detection (exterior vs interior)
+  let zone = 'interior';
+  if (/exterior|fachada|jardín|garden|pool|piscina|entrada|acceso|estacionamiento|parking|vista\s*(aérea|desde)|sendero|terraza\s*común|áreas?\s*verde|playa|beach/i.test(l)) zone = 'exterior';
+  // Room type for adjacency logic
+  let room = 'other';
+  if (/living|sala|salón/i.test(l)) room = 'living';
+  if (/kitchen|cocina/i.test(l)) room = 'kitchen';
+  if (/dining|comedor/i.test(l)) room = 'dining';
+  if (/bedroom|dormitorio|habitaci|master|recámara/i.test(l)) room = 'bedroom';
+  if (/bathroom|baño/i.test(l)) room = 'bathroom';
+  if (/lobby|recepci|entrance|entrada/i.test(l)) room = 'lobby';
+  if (/pool|piscina/i.test(l)) room = 'pool';
+  if (/balcon|terraza|rooftop|azotea/i.test(l)) room = 'terrace';
+  if (/walk-in|closet|vestidor/i.test(l)) room = 'closet';
+  if (/laundry|lavandería/i.test(l)) room = 'laundry';
+  if (/office|oficina|estudio|home\s*office/i.test(l)) room = 'office';
+  return { floor, zone, room };
+}
 
-  // Find last scene key to link navigation
-  const sceneKeys = Object.keys(SCENES);
-  const lastKey = sceneKeys[sceneKeys.length - 1];
+// Room adjacency rules (which rooms connect naturally)
+const __ROOM_ADJACENCY = {
+  lobby: ['living', 'lobby', 'pool', 'terrace'],
+  living: ['kitchen', 'dining', 'terrace', 'lobby', 'office'],
+  kitchen: ['dining', 'living', 'laundry'],
+  dining: ['living', 'kitchen', 'terrace'],
+  bedroom: ['bathroom', 'closet', 'terrace', 'bedroom'],
+  bathroom: ['bedroom', 'closet'],
+  closet: ['bedroom', 'bathroom'],
+  pool: ['terrace', 'lobby', 'living'],
+  terrace: ['living', 'dining', 'pool', 'bedroom'],
+  office: ['living', 'bedroom'],
+  laundry: ['kitchen'],
+  other: ['living', 'lobby', 'other']
+};
+
+function __rebuildTourNavigation() {
+  const keys = Object.keys(SCENES);
+  if (keys.length <= 1) return;
+
+  // Classify all scenes
+  const sceneData = keys.map(k => ({
+    key: k, ...SCENES[k], ...__detectFloorZone(SCENES[k].label)
+  }));
+
+  // Reset all navigation
+  sceneData.forEach(s => { SCENES[s.key].nav = { n: null, e: null, w: null, s: null }; });
+
+  // For each scene, find logical neighbors
+  sceneData.forEach((s, i) => {
+    const candidates = sceneData.filter(c => c.key !== s.key);
+    const adj = __ROOM_ADJACENCY[s.room] || __ROOM_ADJACENCY.other;
+
+    // Same floor, adjacent room → East/West
+    const sameFloor = candidates.filter(c => c.floor === s.floor);
+    const adjacent = sameFloor.filter(c => adj.includes(c.room));
+    const preferred = adjacent.length > 0 ? adjacent : sameFloor;
+
+    // East: next logical room on same floor
+    if (!SCENES[s.key].nav.e && preferred.length > 0) {
+      // Pick the first unlinked adjacent room
+      const east = preferred.find(c => !Object.values(SCENES[s.key].nav).includes(c.key));
+      if (east) SCENES[s.key].nav.e = east.key;
+    }
+
+    // West: previous room (reverse link)
+    if (!SCENES[s.key].nav.w && i > 0) {
+      const sameFloorPrev = sceneData.slice(0, i).reverse().find(c => c.floor === s.floor);
+      if (sameFloorPrev) SCENES[s.key].nav.w = sameFloorPrev.key;
+    }
+
+    // North: go upstairs (higher floor, same zone)
+    const upstairs = candidates.find(c => c.floor === s.floor + 1 && c.zone === s.zone);
+    if (upstairs) SCENES[s.key].nav.n = upstairs.key;
+
+    // South: go downstairs (lower floor, same zone)
+    const downstairs = candidates.find(c => c.floor === s.floor - 1 && c.zone === s.zone);
+    if (downstairs) SCENES[s.key].nav.s = downstairs.key;
+
+    // If no N/S (single floor), use N for exterior and S for going back
+    if (!SCENES[s.key].nav.n && s.zone === 'interior') {
+      const ext = candidates.find(c => c.zone === 'exterior' && c.floor === s.floor);
+      if (ext) SCENES[s.key].nav.n = ext.key;
+    }
+    if (!SCENES[s.key].nav.s && s.zone === 'exterior') {
+      const int = candidates.find(c => c.zone === 'interior' && c.floor === s.floor);
+      if (int) SCENES[s.key].nav.s = int.key;
+    }
+  });
+}
+
+function addToTour(src, label, opts = {}) {
+  const key = 'gen_tour_' + Date.now() + '_' + Math.random().toString(36).slice(2,4);
+  IMG[key] = { src, label };
 
   SCENES[key] = {
     key, img: key, label,
-    nav: { n: null, e: null, w: lastKey, s: null }
+    nav: { n: null, e: null, w: null, s: null }
   };
 
-  // Link previous scene to this one
-  if (lastKey && SCENES[lastKey]) {
-    if (!SCENES[lastKey].nav.e) SCENES[lastKey].nav.e = key;
-    else if (!SCENES[lastKey].nav.n) SCENES[lastKey].nav.n = key;
-  }
+  // Rebuild all navigation with smart adjacency
+  __rebuildTourNavigation();
 
   buildGallery();
   updateMinimap();
-  showToast(`🧭 "${label}" agregado al tour virtual`);
 
-  // Navigate to new scene
-  goToScene(key);
-  switchTab('tour');
+  // Only navigate and switch tab if NOT in swarm mode
+  if (!opts.silent) {
+    showToast(`🧭 "${label}" agregado al tour virtual`);
+    goToScene(key);
+    switchTab('tour');
+  }
+
+  // Set first scene if none
+  if (!state.currentScene) {
+    state.currentScene = key;
+  }
 }
 
 function downloadChatRender(btn) {
@@ -3039,26 +3201,59 @@ function decomposeProjectTasks(projectInfo) {
   tasks.push({ id: id++, type: 'coordinator', name: 'Coordinator Beta', task: 'Asignar tareas', taskFn: 'coord' });
   tasks.push({ id: id++, type: 'coordinator', name: 'Coordinator Gamma', task: 'Monitorear progreso', taskFn: 'coord' });
 
+  // Build rich prompts using geo context materials, vegetation, lighting
+  const mats = geo.materials || {};
+  const floors = mats.floors ? mats.floors[0] : 'premium flooring';
+  const walls = mats.walls ? mats.walls[0] : 'premium wall finish';
+  const counters = mats.countertops ? mats.countertops[0] : 'premium countertops';
+  const veg = (geo.vegetation || []).slice(0, 3).join(', ') || 'tropical vegetation';
+  const furn = (geo.furniture || []).slice(0, 2).join(', ') || 'designer furniture';
+  const light = (geo.lighting || [])[0] || 'natural warm lighting';
+  const climate = geo.climate || 'tropical';
+
   // Render agents — exterior views (4-18)
   const exteriorScenes = [
-    'Fachada principal', 'Vista aérea', 'Entrada del proyecto', 'Piscina comunitaria',
-    'Áreas verdes', 'Acceso playa', 'Estacionamiento', 'Lobby', 'Fachada nocturna',
-    'Vista panorámica', 'Jardines tropicales', 'Área BBQ', 'Terraza común',
-    'Sendero peatonal', 'Vista desde el mar'
+    { task: 'Fachada principal', prompt: `main facade front view, ${style} architecture, ${walls}, landscaped entrance with ${veg}, ${light}, golden hour` },
+    { task: 'Vista aérea', prompt: `aerial drone view of the entire ${style} complex, rooftops, pools, gardens with ${veg}, ocean/landscape in background` },
+    { task: 'Entrada del proyecto', prompt: `grand entrance gate and driveway, ${style} design, security booth, ${veg} landscaping, welcoming luxury atmosphere` },
+    { task: 'Piscina comunitaria', prompt: `infinity pool area, sun loungers, ${veg} around, ${style} cabanas, blue water, ${light}` },
+    { task: 'Áreas verdes', prompt: `lush gardens and walking paths, ${veg}, benches, ${style} landscape design, peaceful atmosphere` },
+    { task: 'Acceso playa', prompt: `beach access path from the complex, ${veg}, wooden walkway, ocean view, ${climate} atmosphere` },
+    { task: 'Estacionamiento', prompt: `covered parking area, ${style} architecture, clean design, electric vehicle chargers, landscaped edges` },
+    { task: 'Lobby', prompt: `luxury lobby interior, double height ceiling, ${floors} flooring, ${walls} walls, reception desk, ${furn}, ${light}` },
+    { task: 'Fachada nocturna', prompt: `night view of main facade, dramatic architectural lighting, uplighting on ${veg}, warm glow from windows, stars` },
+    { task: 'Vista panorámica', prompt: `panoramic landscape view from the complex, ${climate} sky, ${veg} foreground, ocean/mountains in distance` },
+    { task: 'Jardines tropicales', prompt: `detailed garden area, ${veg}, stone pathways, water feature, ${style} landscape, butterfly garden` },
+    { task: 'Área BBQ', prompt: `outdoor BBQ and dining area, stone grill, ${furn}, string lights, ${veg}, sunset atmosphere` },
+    { task: 'Terraza común', prompt: `communal rooftop terrace, lounge seating, ${furn}, panoramic views, ${veg} in planters, ${light}` },
+    { task: 'Sendero peatonal', prompt: `pedestrian walkway through the complex, ${veg} on both sides, subtle path lighting, ${style} design` },
+    { task: 'Vista desde el mar', prompt: `view of the complex from the sea/beach, ${style} architecture visible, ${veg}, dramatic sky, ${light}` }
   ];
-  exteriorScenes.forEach(scene => {
-    tasks.push({ id: id++, type: 'render', name: `Render Ext ${id-4}`, task: scene, taskFn: 'render',
-      prompt: `${style} ${scene.toLowerCase()} of ${name}, ${location}, tropical architecture, natural lighting, professional photography, 8K ultra-realistic, photorealistic` });
+  exteriorScenes.forEach((s, i) => {
+    tasks.push({ id: id++, type: 'render', name: `Render Ext ${i+1}`, task: s.task, taskFn: 'render',
+      prompt: `${s.prompt}, ${name}, ${location}, photorealistic architectural render, 8K, professional real estate photography, no text no watermark` });
   });
 
   // Render agents — per unit type interiors (19-58)
-  const interiorScenes = ['Living room', 'Kitchen', 'Master bedroom', 'Bathroom', 'Balcony/Terrace',
-    'Dining area', 'Second bedroom', 'Rooftop', 'Pool area', 'Walk-in closet',
-    'Home office', 'Laundry', 'Entrance hall'];
+  const interiorScenes = [
+    { task: 'Living room', prompt: `spacious living room, ${floors} flooring, ${walls} walls, ${furn}, floor-to-ceiling windows, ${light}` },
+    { task: 'Kitchen', prompt: `modern open kitchen, ${counters} countertops, ${floors} flooring, stainless steel appliances, island bar, ${light}` },
+    { task: 'Master bedroom', prompt: `luxury master bedroom, king bed, ${floors} flooring, ${walls} walls, panoramic window, walk-in closet entrance visible, ${light}` },
+    { task: 'Bathroom', prompt: `spa-like master bathroom, rain shower, freestanding bathtub, ${counters} vanity, ${floors} floor, ${light}` },
+    { task: 'Balcony/Terrace', prompt: `private balcony/terrace, ${furn}, ${veg} in planters, view of ${location}, ${light}, relaxing atmosphere` },
+    { task: 'Dining area', prompt: `elegant dining area, 8-person table, ${floors} flooring, pendant lighting, connected to kitchen, ${light}` },
+    { task: 'Second bedroom', prompt: `second bedroom, twin or queen bed, ${floors} flooring, ${walls} walls, workspace corner, ${light}` },
+    { task: 'Rooftop', prompt: `private rooftop terrace, jacuzzi, lounge area, ${furn}, panoramic ${location} view, ${light}, sunset sky` },
+    { task: 'Pool area', prompt: `private plunge pool, sun deck, ${furn}, ${veg}, ${light}, crystal clear water` },
+    { task: 'Walk-in closet', prompt: `luxury walk-in closet, custom shelving, island dresser, LED strip lighting, ${floors} flooring, mirror wall` },
+    { task: 'Home office', prompt: `home office with view, built-in desk, bookshelves, ${floors} flooring, ${light}, ergonomic chair` },
+    { task: 'Laundry', prompt: `modern laundry room, washer dryer, utility sink, storage cabinets, ${floors} flooring, clean design` },
+    { task: 'Entrance hall', prompt: `unit entrance hallway, ${floors} flooring, ${walls} walls, coat closet, ${light}, welcoming atmosphere` }
+  ];
   unitTypes.forEach(unit => {
-    interiorScenes.forEach(scene => {
-      tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,4)} ${id%100}`, task: `${unit} — ${scene}`, taskFn: 'render',
-        prompt: `${style} ${scene.toLowerCase()} inside a ${unit.toLowerCase()}, ${name}, ${location}, modern interior design, premium materials, natural light, 8K ultra-realistic` });
+    interiorScenes.forEach((s, i) => {
+      tasks.push({ id: id++, type: 'render', name: `Render ${unit.slice(0,4)} ${id%100}`, task: `${unit} — ${s.task}`, taskFn: 'render',
+        prompt: `${s.prompt}, inside a luxury ${unit.toLowerCase()}, ${style} architecture, ${name}, ${location}, photorealistic interior render, 8K, professional photography, no text no watermark` });
     });
   });
 
@@ -3145,7 +3340,8 @@ async function executeAgent(agent) {
         if (imgUrl) {
           agent.renderUrl = imgUrl;
           addRenderToGallery(imgUrl, agent.task);
-          swarmLog(agent.name, `✅ Render generado: ${agent.task}`, 'ok');
+          addToTour(imgUrl, agent.task, { silent: true });
+          swarmLog(agent.name, `✅ Render generado + agregado al tour: ${agent.task}`, 'ok');
         } else {
           swarmLog(agent.name, `⚠️ Render no generado (sin provider disponible)`, 'err');
         }
