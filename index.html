@@ -2409,83 +2409,105 @@ function removeEl(el) {
 // CENTRALIZED IMAGE GENERATION (multi-provider fallback)
 // =============================================
 async function generateImage(prompt) {
+  const hfKey = () => state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
+
+  // HuggingFace free inference helper
+  const hfImg = (model, params={}) => async () => {
+    const k = hfKey(); if (!k) throw new Error('No HF key');
+    const r = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+      method: 'POST', signal: AbortSignal.timeout(90000),
+      headers: { 'Authorization': `Bearer ${k.trim()}`, 'Content-Type': 'application/json', 'x-wait-for-model': 'true' },
+      body: JSON.stringify({ inputs: prompt, parameters: { width: 1024, height: 576, num_inference_steps: 20, guidance_scale: 7.5, ...params } })
+    });
+    if (!r.ok) throw new Error(`HF ${model.split('/')[1]} ${r.status}`);
+    const blob = await r.blob();
+    if (blob.size < 500) throw new Error('HF empty response');
+    return URL.createObjectURL(blob);
+  };
+
   const providers = [
-    // 0. OpenRouter — Gemini 2.0 Flash image generation (same API already working for chat)
+    // 0. HuggingFace FLUX.1-schnell — fastest, highest quality (free token required)
+    hfImg('black-forest-labs/FLUX.1-schnell', { num_inference_steps: 4, guidance_scale: 0 }),
+    // 1. HuggingFace SDXL-Lightning — very fast (free token required)
+    hfImg('ByteDance/SDXL-Lightning', { num_inference_steps: 4 }),
+    // 2. HuggingFace FLUX.1-dev (free token required)
+    hfImg('black-forest-labs/FLUX.1-dev', { num_inference_steps: 20 }),
+    // 3. Pollinations.ai FLUX (free, no key needed)
+    async () => {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(45000) });
+      if (!r.ok) throw new Error('Pollinations ' + r.status);
+      const blob = await r.blob();
+      if (blob.size < 500) throw new Error('Pollinations empty');
+      return URL.createObjectURL(blob);
+    },
+    // 4. Pollinations.ai turbo (free, no key needed)
+    async () => {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=turbo&nologo=true&seed=${Date.now()+1}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(45000) });
+      if (!r.ok) throw new Error('Pollinations turbo ' + r.status);
+      const blob = await r.blob();
+      if (blob.size < 500) throw new Error('Pollinations turbo empty');
+      return URL.createObjectURL(blob);
+    },
+    // 5. Stable Horde — community GPUs, completely free, no key needed (slow ~1-2 min)
+    async () => {
+      const sub = await fetch('https://stablehorde.net/api/v2/generate/async', {
+        method: 'POST', signal: AbortSignal.timeout(15000),
+        headers: { 'Content-Type': 'application/json', 'apikey': '0000000000' },
+        body: JSON.stringify({ prompt, params: { width: 512, height: 512, steps: 20, sampler_name: 'k_euler', karras: true, n: 1 }, models: ['stable_diffusion_xl'] })
+      });
+      if (!sub.ok) throw new Error('Horde submit ' + sub.status);
+      const { id } = await sub.json();
+      if (!id) throw new Error('No Horde job id');
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => setTimeout(r, 4000));
+        const check = await fetch(`https://stablehorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
+        const c = await check.json();
+        if (c.done) {
+          const st = await fetch(`https://stablehorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(5000) });
+          const s = await st.json();
+          const b64 = s.generations?.[0]?.img;
+          if (b64) return `data:image/webp;base64,${b64}`;
+          throw new Error('No Horde image');
+        }
+        if (c.faulted) throw new Error('Horde job faulted');
+      }
+      throw new Error('Horde timeout');
+    },
+    // 6. OpenRouter Gemini 2.0 Flash image generation
     async () => {
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST', signal: AbortSignal.timeout(60000),
         headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
-        body: JSON.stringify({
-          model: 'google/gemini-2.0-flash-exp:free',
-          modalities: ['image', 'text'],
-          messages: [{ role: 'user', content: `Generate a photorealistic architectural render image: ${prompt}` }]
-        })
+        body: JSON.stringify({ model: 'google/gemini-2.0-flash-exp:free', modalities: ['image', 'text'], messages: [{ role: 'user', content: `Generate a photorealistic architectural render: ${prompt}` }] })
       });
       if (!resp.ok) throw new Error('OR-Gemini ' + resp.status);
       const d = await resp.json();
-      // Gemini returns image in content parts
       const parts = d.choices?.[0]?.message?.content;
       if (Array.isArray(parts)) {
-        const imgPart = parts.find(p => p.type === 'image_url' || p.inline_data);
-        if (imgPart?.image_url?.url) return imgPart.image_url.url;
-        if (imgPart?.inline_data?.data) return `data:${imgPart.inline_data.mime_type || 'image/png'};base64,${imgPart.inline_data.data}`;
+        const ip = parts.find(p => p.type === 'image_url' || p.inline_data);
+        if (ip?.image_url?.url) return ip.image_url.url;
+        if (ip?.inline_data?.data) return `data:${ip.inline_data.mime_type||'image/png'};base64,${ip.inline_data.data}`;
       }
-      // Also check top-level images array (some OpenRouter responses)
-      const img = d.choices?.[0]?.message?.images?.[0];
-      if (img) return img.url || img.image_url?.url || `data:image/png;base64,${img}`;
       throw new Error('No image in Gemini response');
     },
-    // 1. Pollinations.ai (free, no key)
-    async () => {
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      if (!r.ok) throw new Error('Pollinations ' + r.status);
-      return URL.createObjectURL(await r.blob());
-    },
-    // 2. Pollinations.ai alternate endpoint
-    async () => {
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=turbo&nologo=true&seed=${Date.now()+1}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      if (!r.ok) throw new Error('Pollinations turbo ' + r.status);
-      return URL.createObjectURL(await r.blob());
-    },
-    // 3. HuggingFace SDXL (if key available)
-    async () => {
-      const hfKey = state.hfKey || localStorage.getItem('hf_key') || localStorage.getItem('cayenabot_hf_key') || '';
-      if (!hfKey) throw new Error('No HF key');
-      const r = await fetch('https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0', {
-        method: 'POST', signal: AbortSignal.timeout(60000),
-        headers: { 'Authorization': `Bearer ${hfKey.trim()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs: prompt, parameters: { num_inference_steps: 25, guidance_scale: 7.5, width: 1024, height: 576 } })
-      });
-      if (!r.ok) throw new Error('HF ' + r.status);
-      return URL.createObjectURL(await r.blob());
-    },
-    // 4. Together.ai free FLUX (if key available)
-    async () => {
-      const key = localStorage.getItem('cayenabot_together_key') || '';
-      if (!key) throw new Error('No Together key');
-      const r = await fetch('https://api.together.xyz/v1/images/generations', {
-        method: 'POST', signal: AbortSignal.timeout(30000),
-        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell', prompt, width: 1024, height: 768, steps: 4, n: 1 })
-      });
-      if (!r.ok) throw new Error('Together ' + r.status);
-      const d = await r.json();
-      return d.data?.[0]?.url || d.data?.[0]?.b64_json;
-    }
+    // 7. HuggingFace SDXL base (free token required)
+    hfImg('stabilityai/stable-diffusion-xl-base-1.0', { num_inference_steps: 25 })
   ];
 
+  const errors = [];
   for (const provider of providers) {
     try {
       const result = await provider();
       if (result) return result;
     } catch(e) {
+      errors.push(e.message);
       console.log('Image provider failed:', e.message);
-      continue;
     }
   }
-  return null; // all failed
+  console.error('All image providers failed:', errors);
+  return null;
 }
 
 // =============================================
@@ -2618,7 +2640,12 @@ async function generateRenderFromChat(prompt, label) {
 
     if (!imgSrc) {
       removeEl(statusMsg);
-      addMsg('assistant', `⚠️ No se pudo generar el render. Todos los proveedores fallaron. Intenta de nuevo en unos minutos.`);
+      const hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || '';
+      if (!hfKey) {
+        addMsg('assistant', `⚠️ <strong>Render fallido.</strong> Agrega tu <strong>HuggingFace token gratis</strong> en ⚙️ Configuración para activar FLUX.1 y SDXL-Lightning.<br><a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--blue)">→ Obtener token gratis en hf.co</a> (requiere cuenta gratuita)`);
+      } else {
+        addMsg('assistant', `⚠️ <strong>Render fallido.</strong> Todos los proveedores están ocupados. El sistema intentó HF FLUX.1, SDXL-Lightning, Pollinations y Stable Horde. Intenta de nuevo en un momento.`);
+      }
       return;
     }
 
