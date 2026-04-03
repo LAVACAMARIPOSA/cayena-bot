@@ -987,9 +987,9 @@ function refreshProjectList() {
     const imgCount = Object.keys(p.images || {}).length;
     const sceneCount = Object.keys(p.scenes || {}).length;
     const date = p.savedAt ? new Date(p.savedAt).toLocaleDateString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha';
-    const thumb = Object.values(p.images || {})[0]?.src || '';
-    return `<div class="project-card" onclick="loadProject(${i})" style="display:flex;gap:14px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;cursor:pointer;transition:all 0.2s" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(196,119,59,0.05)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.06)';this.style.background='rgba(255,255,255,0.03)'">
-      ${thumb ? `<img src="${thumb}" style="width:72px;height:52px;border-radius:8px;object-fit:cover;flex-shrink:0">` : '<div style="width:72px;height:52px;border-radius:8px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">🏗️</div>'}
+    const hasImages = Object.keys(p.images || {}).length > 0;
+    return `<div class="project-card" data-idx="${i}" style="display:flex;gap:14px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;cursor:pointer;transition:all 0.2s" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(196,119,59,0.05)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.06)';this.style.background='rgba(255,255,255,0.03)'">
+      <div style="width:72px;height:52px;border-radius:8px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">${hasImages ? '🖼️' : '🏗️'}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:15px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name || 'Sin nombre'}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.location || 'Sin ubicación'}</div>
@@ -997,9 +997,25 @@ function refreshProjectList() {
           <span>🖼️ ${imgCount} imgs</span><span>🧭 ${sceneCount} escenas</span><span>📅 ${date}</span>${p.lastEditedBy ? `<span style="background:${p.lastEditedBy.color};color:#fff;padding:1px 5px;border-radius:3px;font-weight:600">${p.lastEditedBy.id}</span>` : ''}
         </div>
       </div>
-      <button onclick="event.stopPropagation();deleteProject(${i})" style="background:none;border:none;color:rgba(224,80,80,0.5);font-size:16px;cursor:pointer;padding:4px;align-self:start" title="Eliminar">✕</button>
+      <button class="proj-delete-btn" data-idx="${i}" style="background:none;border:none;color:rgba(224,80,80,0.5);font-size:16px;cursor:pointer;padding:4px;align-self:start" title="Eliminar">✕</button>
     </div>`;
   }).join('');
+
+  // Event delegation for project cards (avoids inline onclick issues with base64)
+  list.querySelectorAll('.project-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.proj-delete-btn')) return;
+      const idx = parseInt(card.dataset.idx);
+      if (!isNaN(idx)) loadProject(idx);
+    });
+  });
+  list.querySelectorAll('.proj-delete-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx);
+      if (!isNaN(idx)) deleteProject(idx);
+    });
+  });
 }
 
 function getAllSavedProjects() {
@@ -1048,12 +1064,13 @@ function startNewProject() {
 }
 
 function loadProject(idx) {
-  const projects = getAllSavedProjects();
-  const p = projects[idx];
-  if (!p) return;
+  try {
+    const projects = getAllSavedProjects();
+    const p = projects[idx];
+    if (!p) { showToast('⚠️ Proyecto no encontrado'); return; }
 
-  document.getElementById('project-selector').style.display = 'none';
-  newProject(true);
+    document.getElementById('project-selector').style.display = 'none';
+    newProject(true);
 
   // Restore project data
   if (p.images) Object.assign(IMG, p.images);
@@ -1097,7 +1114,12 @@ function loadProject(idx) {
   if (typeof buildFloorPlans === 'function') buildFloorPlans();
   setTimeout(() => { window.__tourInited = false; initTourEngine(); }, 300);
 
-  showToast(`📂 Proyecto cargado: ${p.name || 'Sin nombre'}`);
+    showToast(`📂 Proyecto cargado: ${p.name || 'Sin nombre'}`);
+  } catch(e) {
+    console.error('Error loading project:', e);
+    showToast(`⚠️ Error cargando proyecto: ${e.message}`);
+    document.getElementById('project-selector').style.display = '';
+  }
 }
 
 function deleteProject(idx) {
@@ -1193,11 +1215,16 @@ function deleteProject(idx) {
       <div id="tour-thumbstrip"></div>
 
       <!-- Empty state -->
-      <div id="tour-empty" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5;pointer-events:none">
-        <div style="text-align:center;color:var(--muted)">
+      <div id="tour-empty" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5">
+        <div style="text-align:center;color:var(--muted);max-width:400px">
           <div style="font-size:64px;margin-bottom:16px">🧭</div>
-          <div style="font-size:20px;font-weight:700;color:#fff;margin-bottom:8px">Tour Virtual</div>
-          <div style="font-size:13px;max-width:300px">Genera renders con el Swarm o sube imágenes para construir tu tour interactivo</div>
+          <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:8px">Tour Virtual</div>
+          <div style="font-size:14px;margin-bottom:20px">Genera renders con AI o toma fotos reales del sitio</div>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            <button onclick="openCameraCapture()" style="padding:12px 24px;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">📷 Capturar fotos del sitio</button>
+            <button onclick="openStyleWizard()" style="padding:12px 24px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:14px;cursor:pointer">⚡ Generar con AI</button>
+          </div>
+          <p style="font-size:11px;margin-top:12px;color:rgba(255,255,255,0.3)">El sistema te guía paso a paso para tomar fotos profesionales</p>
         </div>
       </div>
     </div>
