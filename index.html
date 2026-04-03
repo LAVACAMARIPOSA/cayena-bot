@@ -4297,16 +4297,16 @@ async function sendChat() {
     return;
   }
 
-  // Swarm activation
-  const swarmKeywords = /(?:100\s*agentes|swarm|ruflo|desplegar\s*agentes|genera(?:r)?\s+(?:todo|el\s+proyecto|proyecto\s+completo)|lanzar\s+agentes)/i;
-  if (swarmKeywords.test(text)) {
-    addMsg('assistant', '🎨 <strong>Abriendo Wizard de Estilo</strong> — Selecciona el estilo visual antes de generar para que todos los renders sean coherentes.');
-    setTimeout(() => openStyleWizard(), 300);
+  // Swarm activation — any request that implies generating visual content
+  const swarmKeywords = /(?:100\s*agentes|swarm|ruflo|desplegar|lanzar|genera|hazme|crea|haz|dame|necesito|quiero)\s*(?:agentes|renders?|tour|virtual|imagenes|fotos|visualiz|proyecto|el proyecto|todo|completo|de este|de eso|de mi|los renders|un tour|el tour|una galeria|plataforma)/i;
+  if (swarmKeywords.test(text) && !text.includes('?')) {
+    addMsg('assistant', '<strong>Preparando generacion</strong> — Selecciona el estilo visual para coherencia en todos los renders.');
+    setTimeout(function() { openStyleWizard(); }, 300);
     __chatProcessing = false;
     return;
   }
 
-  // Direct render shortcut: if user says just "render [something]" without needing AI
+  // Direct render shortcut
   const directRenderMatch = text.match(/^(?:render|genera(?:r)?(?:\s+render)?(?:\s+de)?)\s+(.+)/i);
   if (directRenderMatch && !text.includes('?') && text.length < 200) {
     const desc = directRenderMatch[1].toLowerCase();
