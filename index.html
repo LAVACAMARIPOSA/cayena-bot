@@ -839,47 +839,113 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </head>
 <body>
 
-<!-- LOGIN SCREEN -->
+<!-- LOGIN SCREEN — Multi-user avatar selection -->
 <div id="login-screen" style="position:fixed;inset:0;z-index:99999;background:linear-gradient(135deg,#0a0a1a 0%,#1a1a2e 50%,#0d1117 100%);display:flex;align-items:center;justify-content:center">
-  <div style="text-align:center;max-width:380px;width:90%">
+  <div style="text-align:center;max-width:420px;width:90%">
     <div style="font-size:56px;margin-bottom:16px">🏗️</div>
     <h1 style="color:#fff;font-size:28px;font-weight:800;margin:0 0 4px;letter-spacing:-0.02em">CayenaBot</h1>
-    <p style="color:var(--gold);font-size:13px;text-transform:uppercase;letter-spacing:0.15em;margin:0 0 32px">AI PropTech Builder</p>
-    <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:28px">
-      <div style="margin-bottom:16px">
-        <label style="display:block;text-align:left;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600">Usuario</label>
-        <input id="login-user" type="text" placeholder="Ingresa tu usuario" autocomplete="username" style="width:100%;padding:12px 16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:15px;outline:none;transition:border-color 0.2s" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'">
-      </div>
-      <div style="margin-bottom:20px">
-        <label style="display:block;text-align:left;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600">Contraseña</label>
-        <input id="login-pass" type="password" placeholder="Ingresa tu clave" autocomplete="current-password" style="width:100%;padding:12px 16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:15px;outline:none;transition:border-color 0.2s" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'" onkeydown="if(event.key==='Enter')doLogin()">
-      </div>
-      <button onclick="doLogin()" style="width:100%;padding:14px;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:transform 0.2s" onmouseenter="this.style.transform='scale(1.02)'" onmouseleave="this.style.transform='scale(1)'">Entrar</button>
-      <div id="login-error" style="color:#e05;font-size:13px;margin-top:12px;display:none"></div>
+    <p style="color:var(--gold);font-size:13px;text-transform:uppercase;letter-spacing:0.15em;margin:0 0 28px">AI PropTech Builder</p>
+
+    <!-- User selection -->
+    <div style="margin-bottom:20px">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:12px">¿Quién eres?</p>
+      <div id="user-avatars" style="display:flex;justify-content:center;gap:12px;flex-wrap:wrap"></div>
     </div>
-    <p style="color:rgba(255,255,255,0.2);font-size:11px;margin-top:20px">Powered by CayenaBot AI · v3.0</p>
+
+    <!-- Password (shows after selecting user) -->
+    <div id="login-pass-section" style="display:none;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div id="login-selected-avatar" style="width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff"></div>
+        <div style="text-align:left">
+          <div id="login-selected-name" style="color:#fff;font-size:16px;font-weight:700"></div>
+          <div style="color:var(--muted);font-size:11px">Ingresa tu clave para continuar</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input id="login-pass" type="password" placeholder="Clave" autocomplete="current-password" style="flex:1;padding:12px 16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:18px;letter-spacing:4px;outline:none;text-align:center" onkeydown="if(event.key==='Enter')doLogin()">
+        <button onclick="doLogin()" style="padding:12px 24px;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer">→</button>
+      </div>
+      <div id="login-error" style="color:#e05;font-size:13px;margin-top:10px;display:none"></div>
+    </div>
+    <p style="color:rgba(255,255,255,0.15);font-size:10px;margin-top:24px">Powered by CayenaBot AI · v3.0</p>
   </div>
 </div>
 <script>
+// Multi-user system
+const __USERS = [
+  { id: 'ISA', name: 'Isa', pass: '151202', color: '#e05090', emoji: '👩‍💼' },
+  { id: 'JAG', name: 'Jag', pass: '121174', color: '#c4773b', emoji: '👨‍💻' },
+  { id: 'PAM', name: 'Pam', pass: '260572', color: '#5b8def', emoji: '👩‍🎨' },
+  { id: 'ALV', name: 'Alv', pass: '221297', color: '#10b981', emoji: '👨‍🔧' }
+];
+
+let __selectedUser = null;
+let __currentUser = null;
+
+// Render user avatars
+(function renderAvatars() {
+  const container = document.getElementById('user-avatars');
+  if (!container) return;
+  container.innerHTML = __USERS.map(u => `
+    <div onclick="selectLoginUser('${u.id}')" id="avatar-${u.id}" style="cursor:pointer;text-align:center;transition:all 0.2s;padding:8px" onmouseenter="this.style.transform='scale(1.1)'" onmouseleave="this.style.transform='scale(1)'">
+      <div style="width:64px;height:64px;border-radius:50%;background:${u.color};display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 6px;border:3px solid transparent;transition:border-color 0.2s" id="avatar-circle-${u.id}">${u.emoji}</div>
+      <div style="color:#fff;font-size:14px;font-weight:700">${u.name}</div>
+      <div style="color:var(--muted);font-size:10px">${u.id}</div>
+    </div>
+  `).join('');
+})();
+
+function selectLoginUser(userId) {
+  const user = __USERS.find(u => u.id === userId);
+  if (!user) return;
+  __selectedUser = user;
+
+  // Highlight selected avatar
+  __USERS.forEach(u => {
+    const circle = document.getElementById('avatar-circle-' + u.id);
+    if (circle) circle.style.borderColor = u.id === userId ? u.color : 'transparent';
+  });
+
+  // Show password section
+  document.getElementById('login-pass-section').style.display = '';
+  document.getElementById('login-selected-avatar').style.background = user.color;
+  document.getElementById('login-selected-avatar').textContent = user.emoji;
+  document.getElementById('login-selected-name').textContent = user.name;
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-pass').focus();
+  document.getElementById('login-error').style.display = 'none';
+}
+
 function doLogin() {
-  const user = document.getElementById('login-user').value.trim();
+  if (!__selectedUser) return;
   const pass = document.getElementById('login-pass').value.trim();
   const errEl = document.getElementById('login-error');
-  if (user === 'OHANA' && pass === '121174') {
-    // Show project selector (not the app directly)
+
+  if (pass === __selectedUser.pass) {
+    __currentUser = __selectedUser;
+    state.__user = { id: __currentUser.id, name: __currentUser.name, color: __currentUser.color, emoji: __currentUser.emoji };
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('project-selector').style.display = '';
     refreshProjectList();
+    // Apply user color theme + show badge
+    document.documentElement.style.setProperty('--user-color', __currentUser.color);
+    const badge = document.getElementById('user-badge');
+    if (badge) {
+      badge.style.background = __currentUser.color;
+      badge.textContent = __currentUser.emoji;
+      badge.style.display = 'flex';
+      badge.title = `${__currentUser.name} (${__currentUser.id}) — Click para cambiar usuario`;
+    }
     if (!localStorage.getItem('cayenabot_tutorial_seen')) {
       setTimeout(() => showTutorial(), 500);
     }
   } else {
-    errEl.textContent = user === '' || pass === '' ? 'Ingresa usuario y contraseña' : 'Usuario o contraseña incorrectos';
+    errEl.textContent = pass === '' ? 'Ingresa tu clave' : 'Clave incorrecta';
     errEl.style.display = '';
     document.getElementById('login-pass').value = '';
+    document.getElementById('login-pass').focus();
   }
 }
-// Always show login — no auto-login
 </script>
 
 <!-- PROJECT SELECTOR (like ChatGPT conversation list) -->
@@ -918,7 +984,7 @@ function refreshProjectList() {
         <div style="font-size:15px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name || 'Sin nombre'}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.location || 'Sin ubicación'}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:10px">
-          <span>🖼️ ${imgCount} imgs</span><span>🧭 ${sceneCount} escenas</span><span>📅 ${date}</span>
+          <span>🖼️ ${imgCount} imgs</span><span>🧭 ${sceneCount} escenas</span><span>📅 ${date}</span>${p.lastEditedBy ? `<span style="background:${p.lastEditedBy.color};color:#fff;padding:1px 5px;border-radius:3px;font-weight:600">${p.lastEditedBy.id}</span>` : ''}
         </div>
       </div>
       <button onclick="event.stopPropagation();deleteProject(${i})" style="background:none;border:none;color:rgba(224,80,80,0.5);font-size:16px;cursor:pointer;padding:4px;align-self:start" title="Eliminar">✕</button>
@@ -1061,6 +1127,7 @@ function deleteProject(idx) {
     <button onclick="__autoSaveProject();document.getElementById('project-selector').style.display='';refreshProjectList()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--muted);font-size:11px;cursor:pointer" title="Mis Proyectos">📂</button>
     <button id="chat-toggle-btn" onclick="toggleWorkspace()">📐 Preview</button>
     <button id="settings-btn" onclick="openSettings()">⚙️</button>
+    <div id="user-badge" style="width:32px;height:32px;border-radius:50%;display:none;align-items:center;justify-content:center;font-size:14px;cursor:pointer;border:2px solid rgba(255,255,255,0.2)" onclick="__autoSaveProject();location.reload()" title="Cambiar usuario"></div>
   </div>
 </header>
 
@@ -3947,7 +4014,9 @@ function addMsg(role, text) {
   const msgs = document.getElementById('chat-messages');
   const d = document.createElement('div');
   d.className = `msg msg-${role} fade-enter`;
-  d.innerHTML = `<div class="msg-bubble">${text.replace(/\n/g,'<br>')}</div>`;
+  // Tag user messages with the current user's color and name
+  const userTag = (role === 'user' && __currentUser) ? `<span style="display:inline-block;background:${__currentUser.color};color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle">${__currentUser.emoji} ${__currentUser.id}</span>` : '';
+  d.innerHTML = `<div class="msg-bubble">${userTag}${text.replace(/\n/g,'<br>')}</div>`;
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
   // Auto-save after messages
@@ -6603,6 +6672,7 @@ function __autoSaveProject() {
       styleDNA: state.__styleDNA || '',
       styleSeed: state.__styleSeed || '',
       currentScene: state.currentScene || '',
+      lastEditedBy: __currentUser ? { id: __currentUser.id, name: __currentUser.name, color: __currentUser.color } : null,
       savedAt: new Date().toISOString(),
       version: 3
     };
