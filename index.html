@@ -5345,6 +5345,38 @@ async function runSwarm(projectInfo) {
     }
   }
 
+  // Phase 3: Idle agents retry failed renders and improve quality
+  const failedAgents = swarmState.agents.filter(a => a.renderFailed && a.prompt);
+  const idleAgents = swarmState.agents.filter(a => a.status === 'done' && !a.renderUrl && a.taskFn !== 'render');
+  if (failedAgents.length > 0 && idleAgents.length > 0) {
+    const retryCount = Math.min(failedAgents.length, idleAgents.length);
+    swarmLog('Coordinator', `🔄 Fase 3: ${retryCount} agentes idle reintentando renders fallidos`);
+    for (let i = 0; i < retryCount; i++) {
+      const idle = idleAgents[i];
+      const failed = failedAgents[i];
+      idle.status = 'active';
+      idle.currentTask = `🔄 Reintentando: ${failed.task}`;
+      idle.progress = 50;
+      updateAgentCard(idle);
+
+      try {
+        const imgUrl = await generateImage(failed.prompt, { fast: true });
+        if (imgUrl) {
+          failed.renderUrl = imgUrl;
+          failed.renderFailed = false;
+          addRenderToGallery(imgUrl, failed.task);
+          addToTour(imgUrl, failed.task, { silent: true });
+          swarmLog(idle.name, `✅ Rescató render: ${failed.task}`, 'ok');
+        }
+      } catch(e) {}
+
+      idle.status = 'done';
+      idle.progress = 100;
+      idle.currentTask = '✅ Ayudó con renders';
+      updateAgentCard(idle);
+    }
+  }
+
   // Done
   clearInterval(swarmState.timerInterval);
   const elapsed = ((Date.now() - swarmState.startTime) / 1000).toFixed(1);
