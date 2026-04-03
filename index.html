@@ -211,6 +211,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 }
 #lightbox.open{display:flex}
 #lightbox-img{max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px}
+#lightbox-video{max-width:90vw;max-height:80vh;border-radius:8px;background:#000}
 #lightbox-label{font-size:14px;color:var(--gold);letter-spacing:0.1em;text-transform:uppercase}
 #lightbox-nav{display:flex;gap:16px;align-items:center}
 .lb-btn{
@@ -1033,7 +1034,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- LIGHTBOX -->
 <div id="lightbox">
   <button id="lightbox-close" onclick="closeLightbox()">✕</button>
-  <img id="lightbox-img" src="" alt="">
+  <div id="lightbox-media-wrap" style="text-align:center"><img id="lightbox-img" src="" alt="" style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px"></div>
   <div id="lightbox-label"></div>
   <div id="lightbox-nav">
     <button class="lb-btn" onclick="lightboxPrev()">← Anterior</button>
@@ -1083,6 +1084,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="font-size:12px;color:var(--muted);margin-bottom:16px;padding:12px;background:rgba(0,204,102,0.08);border-radius:8px;border:1px solid rgba(0,204,102,0.2)">
       ✅ <strong>Chat AI</strong> — OpenRouter (modelos gratuitos, $0 gasto)<br>
       ✅ <strong>Renders</strong> — Pollinations.ai + FLUX (gratis, ilimitado)<br>
+      🎬 <strong>Videos</strong> — HuggingFace gratuito (requiere tu token gratis en hf.co)<br>
       <span style="font-size:11px">Las keys vienen preconfiguradas. Puedes cambiarlas si tienes las tuyas.</span>
     </div>
     <div class="settings-field">
@@ -1092,8 +1094,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="settings-status" id="or-status"></div>
     </div>
     <div class="settings-field">
-      <label>HuggingFace API Key <span style="color:var(--muted);font-weight:400">(opcional — renders extra)</span></label>
+      <label>HuggingFace API Key <span style="color:var(--muted);font-weight:400">(gratis — renders + generación de VIDEO)</span></label>
       <input type="password" id="hf-key-input" placeholder="hf_...">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Token gratuito en <a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--blue)">huggingface.co/settings/tokens</a> — habilita generación de video AI.</div>
       <div class="settings-status" id="hf-status"></div>
     </div>
     <button id="settings-test-btn" onclick="testConnections()">🔗 Probar Conexión</button>
@@ -1700,6 +1703,11 @@ ARCHIVO UPLOAD: El usuario puede subir imágenes, ZIP, PDF, planos DWG/DXF, mode
 
 GUARDAR/EXPORTAR: El usuario puede guardar su proyecto, exportarlo como JSON, e importarlo después. Usa los botones de la toolbar.
 
+GENERACIÓN DE VIDEO — FORMATO EXACTO:
+Cuando el usuario pida videos o animaciones, incluye bloques [VIDEO: descripción en inglés].
+Ejemplos: [VIDEO: luxury Caribbean infinity pool at sunset, slow cinematic pan], [VIDEO: modern apartment living room walkthrough, golden hour light], [VIDEO: aerial drone shot over tropical beach resort].
+Usa prompts descriptivos y cinemáticos. Máximo 1-2 videos por respuesta (tarda 1-3 minutos cada uno).
+
 Responde profesional, conciso y proactivo. Si no tiene info del proyecto, pregunta nombre, ubicación y tipo de unidades.`;
 
 // =============================================
@@ -2046,14 +2054,13 @@ function buildGallery() {
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:80px 20px;color:var(--muted)"><div style="font-size:48px;margin-bottom:16px">🖼️</div><div style="font-size:18px;font-weight:600;margin-bottom:8px">Galería vacía</div><div style="font-size:13px">Pide renders en el chat o sube imágenes para comenzar</div></div>';
     return;
   }
-  grid.innerHTML = keys.map((k,i) => 
-    `<div class="gallery-item" onclick="openLightbox(${i})">
-      <img src="${IMG[k].src}" alt="${IMG[k].label}" loading="lazy">
-      <div class="gallery-item-overlay">
-        <span class="gallery-item-label">${IMG[k].label}</span>
-      </div>
-    </div>`
-  ).join('');
+  grid.innerHTML = keys.map((k,i) => {
+    const item = IMG[k];
+    const media = item.type === 'video'
+      ? `<video src="${item.src}" muted loop autoplay playsinline style="width:100%;height:100%;object-fit:cover"></video><div style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700">▶ VIDEO</div>`
+      : `<img src="${item.src}" alt="${item.label}" loading="lazy">`;
+    return `<div class="gallery-item" onclick="openLightbox(${i})">${media}<div class="gallery-item-overlay"><span class="gallery-item-label">${item.label}</span></div></div>`;
+  }).join('');
   state.lightboxItems = keys;
 }
 
@@ -2067,8 +2074,14 @@ function closeLightbox() {
 }
 function updateLightbox() {
   const k = state.lightboxItems[state.lightboxIdx];
-  document.getElementById('lightbox-img').src = IMG[k].src;
-  document.getElementById('lightbox-label').textContent = IMG[k].label;
+  const item = IMG[k];
+  const wrap = document.getElementById('lightbox-media-wrap');
+  if (item.type === 'video') {
+    wrap.innerHTML = `<video id="lightbox-video" src="${item.src}" controls autoplay loop style="max-width:90vw;max-height:80vh;border-radius:8px;background:#000"></video>`;
+  } else {
+    wrap.innerHTML = `<img id="lightbox-img" src="${item.src}" alt="${item.label}" style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px">`;
+  }
+  document.getElementById('lightbox-label').textContent = item.label;
 }
 function lightboxPrev() {
   state.lightboxIdx = (state.lightboxIdx - 1 + state.lightboxItems.length) % state.lightboxItems.length;
@@ -2352,13 +2365,19 @@ async function sendChat() {
 
   state.chatHistory.push({ role: 'assistant', content: reply });
 
-  // Check for render tags in AI response
+  // Check for render and video tags in AI response
   const renderTags = extractRenderTags(reply);
-  const cleanReply = stripRenderTags(reply);
+  const videoTags = extractVideoTags(reply);
+  let cleanReply = stripRenderTags(reply);
+  cleanReply = stripVideoTags(cleanReply);
   if (cleanReply) addMsg('assistant', cleanReply);
   if (renderTags.length > 0) {
     renderTags.forEach(p => renderQueue.push({ prompt: p, label: p.split(',')[0].slice(0, 50) }));
     processRenderQueue();
+  }
+  if (videoTags.length > 0) {
+    videoTags.forEach(p => videoQueue.push({ prompt: p, label: p.split(',')[0].slice(0, 50) }));
+    processVideoQueue();
   }
 }
 
@@ -2470,10 +2489,76 @@ async function generateImage(prompt) {
 }
 
 // =============================================
+// VIDEO GENERATION (HuggingFace free inference)
+// =============================================
+async function generateVideo(prompt) {
+  const hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
+  if (!hfKey) return null;
+
+  // Free HuggingFace inference API models (fastest first)
+  const models = [
+    'Lightricks/LTX-Video-0.9.8-13B-distilled',
+    'Lightricks/LTX-Video',
+    'tencent/HunyuanVideo'
+  ];
+
+  for (const model of models) {
+    try {
+      const r = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+        method: 'POST', signal: AbortSignal.timeout(180000),
+        headers: { 'Authorization': `Bearer ${hfKey.trim()}`, 'Content-Type': 'application/json', 'x-wait-for-model': 'true' },
+        body: JSON.stringify({ inputs: prompt, parameters: { num_frames: 25, num_inference_steps: 20, guidance_scale: 7.5 } })
+      });
+      if (!r.ok) { console.log('HF video', model, r.status); continue; }
+      const blob = await r.blob();
+      if (!blob || blob.size < 1000) continue;
+      return URL.createObjectURL(blob);
+    } catch(e) {
+      console.log('HF video failed:', model, e.message);
+    }
+  }
+  return null;
+}
+
+function addVideoToGallery(src, label) {
+  const key = 'vid_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+  IMG[key] = { src, label, type: 'video' };
+  buildGallery();
+}
+
+async function generateVideoFromChat(prompt, label) {
+  const sceneLabel = label || prompt.slice(0, 50);
+  const hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
+
+  if (!hfKey) {
+    addMsg('assistant', '🎬 Para generar videos necesitas tu <strong>HuggingFace API Key</strong> gratuita.<br>Ve a ⚙️ Configuración → pega tu token de <a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--blue)">hf.co/settings/tokens</a> (es gratis).');
+    return;
+  }
+
+  const statusEl = addMsg('assistant', `🎬 <strong>Generando video:</strong> ${sceneLabel}...<br><div class="render-progress-bar"><div class="render-progress-fill"></div></div><div style="font-size:11px;color:var(--muted);margin-top:4px">Esto puede tomar 1-3 minutos con LTX-Video / HunyuanVideo</div>`);
+
+  const videoSrc = await generateVideo(prompt);
+
+  if (!videoSrc) {
+    statusEl.querySelector('.msg-bubble').innerHTML = '⚠️ No se pudo generar el video. Verifica tu HuggingFace API Key en ⚙️ Configuración. El token debe tener permiso "Inference Providers".';
+    return;
+  }
+
+  const safeLabel = sceneLabel.replace(/'/g, "\\'");
+  statusEl.querySelector('.msg-bubble').innerHTML = `🎬 <strong>${sceneLabel}</strong><br>
+    <video src="${videoSrc}" controls loop autoplay muted playsinline style="width:100%;max-width:520px;border-radius:12px;margin:8px 0"></video><br>
+    <button onclick="addVideoToGallery('${videoSrc}','${safeLabel}');showToast('✅ Video en galería');switchTab('gallery')" style="padding:6px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:13px;margin-right:8px">+ Galería</button>
+    <a href="${videoSrc}" download="${sceneLabel.replace(/\s+/g,'-')}.mp4" style="padding:6px 16px;border-radius:8px;background:var(--card);color:var(--text);font-size:13px;text-decoration:none">⬇️ Descargar</a>`;
+  addVideoToGallery(videoSrc, sceneLabel);
+}
+
+// =============================================
 // AUTO-RENDER FROM CHAT DESCRIPTION
 // =============================================
 let renderQueue = [];
 let renderProcessing = false;
+let videoQueue = [];
+let videoProcessing = false;
 
 function extractRenderTags(text) {
   const regex = /\[RENDER:\s*([^\]]+)\]/gi;
@@ -2485,6 +2570,28 @@ function extractRenderTags(text) {
 
 function stripRenderTags(text) {
   return text.replace(/\[RENDER:\s*[^\]]+\]/gi, '').trim();
+}
+
+function extractVideoTags(text) {
+  const regex = /\[VIDEO:\s*([^\]]+)\]/gi;
+  const matches = [];
+  let m;
+  while ((m = regex.exec(text)) !== null) matches.push(m[1].trim());
+  return matches;
+}
+
+function stripVideoTags(text) {
+  return text.replace(/\[VIDEO:\s*[^\]]+\]/gi, '').trim();
+}
+
+async function processVideoQueue() {
+  if (videoProcessing || videoQueue.length === 0) return;
+  videoProcessing = true;
+  while (videoQueue.length > 0) {
+    const { prompt, label } = videoQueue.shift();
+    await generateVideoFromChat(prompt, label);
+  }
+  videoProcessing = false;
 }
 
 async function processRenderQueue() {
