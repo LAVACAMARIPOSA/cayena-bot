@@ -5155,51 +5155,62 @@ async function sendPlanModification() {
   input.value = '';
 
   addPlanChat('user', text);
-  addPlanChat('ai', '<div class="spinner" style="width:16px;height:16px"></div> Analizando...');
+  addPlanChat('ai', '⏳ Analizando...');
 
   try {
     const planSrc = state.__currentPlanSrc;
     const prevAnalysis = state.__planAnalysis || '';
+    const ctx = state.__planWizardContext || {};
 
+    // Use vision model with image, or fallback to text-only model
     const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
 
-    const messages = [
-      { role: 'system', content: `Eres un arquitecto, ingeniero civil y diseñador experto con 20+ años de experiencia. Estás analizando un plano arquitectónico.
-${state.__planWizardContext ? `PROYECTO: tipo=${state.__planWizardContext.projectType}, etapa=${state.__planWizardContext.stage}, niveles=${state.__planWizardContext.levels}, estructura=${state.__planWizardContext.structure}, terreno=${state.__planWizardContext.landArea || '?'}m², zona sísmica=${state.__planWizardContext.seismic}` : ''}
-ANÁLISIS PREVIO: ${prevAnalysis.slice(0, 2000)}
-Responde en español. Sé técnico, preciso y profesional. Cuando sugieras modificaciones, explica el impacto estructural, de costos y de normativa.` }
-    ];
+    // Build context as part of user message (NOT system - some vision models don't support system msg)
+    const contextPrefix = `[CONTEXTO: Eres arquitecto/ingeniero experto analizando un plano. Proyecto: ${ctx.projectType || '?'}, ${ctx.levels || '?'} niveles, estructura: ${ctx.structure || '?'}, terreno: ${ctx.landArea || '?'}m². Análisis previo: ${prevAnalysis.slice(0, 1500)}]
 
-    // Include the plan image if available
-    if (planSrc) {
-      messages.push({
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: planSrc } },
-          { type: 'text', text: text }
-        ]
-      });
-    } else {
-      messages.push({ role: 'user', content: text });
-    }
+PREGUNTA DEL CLIENTE: ${text}
+
+Responde en español. Sé técnico y profesional. Si piden modificaciones, explica: qué cambiar, impacto estructural, costo estimado, y si cumple normativa. NO puedes dibujar pero describe los cambios con precisión para que un arquitecto los implemente.`;
+
+    const userContent = planSrc
+      ? [{ type: 'image_url', image_url: { url: planSrc } }, { type: 'text', text: contextPrefix }]
+      : contextPrefix;
 
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(90000),
       headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
-      body: JSON.stringify({ model: visionModel, messages })
+      body: JSON.stringify({ model: visionModel, messages: [{ role: 'user', content: userContent }] })
     });
 
     // Remove "Analizando..." message
     const chat = document.getElementById('plan-chat');
-    chat.lastChild.remove();
+    if (chat.lastChild) chat.lastChild.remove();
 
     if (resp.ok) {
       const d = await resp.json();
-      const reply = d.choices?.[0]?.message?.content || 'Sin respuesta';
+      const reply = d.choices?.[0]?.message?.content || 'Sin respuesta del modelo';
       addPlanChat('ai', reply);
     } else {
-      addPlanChat('ai', `❌ Error: HTTP ${resp.status}`);
+      const errText = await resp.text().catch(() => '');
+      addPlanChat('ai', `❌ Error HTTP ${resp.status}. ${errText.slice(0, 150)}`);
+      // Fallback: try with text-only model if vision fails
+      if (resp.status === 400 || resp.status === 422) {
+        addPlanChat('ai', '⏳ Reintentando con modelo de texto...');
+        try {
+          const fallbackResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST', signal: AbortSignal.timeout(60000),
+            headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+            body: JSON.stringify({ model: state.freeModels?.[0] || 'qwen/qwen3-235b-a22b:free', messages: [{ role: 'user', content: contextPrefix }] })
+          });
+          if (fallbackResp.ok) {
+            const fd = await fallbackResp.json();
+            const freply = fd.choices?.[0]?.message?.content || '';
+            if (chat.lastChild) chat.lastChild.remove();
+            if (freply) addPlanChat('ai', freply);
+          }
+        } catch(fe) {}
+      }
     }
   } catch(e) {
     const chat = document.getElementById('plan-chat');
