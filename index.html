@@ -3330,6 +3330,11 @@ function sendSuggestion(el) {
   sendChat();
 }
 
+// Chat message queue + non-blocking processing
+let __chatQueue = [];
+let __chatProcessing = false;
+let __chatAbortController = null;
+
 async function sendChat() {
   const inp = document.getElementById('chat-input');
   const text = inp.value.trim();
@@ -3340,6 +3345,14 @@ async function sendChat() {
   inp.style.height = 'auto';
   state.pendingImages = [];
   updateAttachmentPreviews();
+
+  // If chat is processing, queue the message
+  if (__chatProcessing) {
+    __chatQueue.push({ text, images });
+    addMsg('user', text + (images.length ? '<br><span style="color:var(--muted);font-size:11px">📎 +' + images.length + ' imagen(es)</span>' : ''));
+    addMsg('assistant', '<span style="color:var(--muted);font-size:12px">⏳ En cola — se procesará cuando termine el mensaje actual</span>');
+    return;
+  }
 
   // Show user message with image previews
   const imgPreviews = images.map(img => `<img src="${img.data}" style="max-width:200px;max-height:150px;border-radius:8px;margin:4px 2px;display:inline-block">`).join('');
@@ -3355,11 +3368,58 @@ async function sendChat() {
     addRenderToGallery(img.data, label);
   });
   
-  // Swarm activation: detect "100 agentes", "swarm", "ruflo", "desplegar agentes"
+  // === CHAT ORCHESTRATOR: detect commands for swarm, planos, tour, retry ===
+
+  // Retry failed renders
+  if (/reintenta(?:r)?.*render|retry.*render|vuelve.*generar.*fall/i.test(text)) {
+    addMsg('assistant', '🔄 Reintentando renders fallidos...');
+    retryAllFailed();
+    __chatProcessing = false;
+    return;
+  }
+
+  // Switch to planos tab
+  if (/(?:analiza|sube|ve a|abre).*(?:plano|floor\s*plan)/i.test(text)) {
+    addMsg('assistant', '📐 Cambiando a Planos AI...');
+    switchTab('planos');
+    __chatProcessing = false;
+    return;
+  }
+
+  // Show tour
+  if (/(?:muestra|abre|ve a).*(?:tour|recorrido)/i.test(text)) {
+    addMsg('assistant', '🧭 Abriendo tour virtual...');
+    switchTab('tour');
+    __chatProcessing = false;
+    return;
+  }
+
+  // Stop swarm
+  if (/(?:detén|deten|para|stop).*(?:swarm|agentes|renders)/i.test(text)) {
+    if (swarmState.isRunning) {
+      swarmState.isRunning = false;
+      addMsg('assistant', '⏹ Swarm detenido. Los renders en progreso se completarán pero no se iniciarán nuevos.');
+    } else {
+      addMsg('assistant', 'No hay swarm activo.');
+    }
+    __chatProcessing = false;
+    return;
+  }
+
+  // Open gallery
+  if (/(?:muestra|abre|ve a).*(?:galería|gallery|imágenes)/i.test(text)) {
+    addMsg('assistant', '🖼️ Abriendo galería...');
+    switchTab('gallery');
+    __chatProcessing = false;
+    return;
+  }
+
+  // Swarm activation
   const swarmKeywords = /(?:100\s*agentes|swarm|ruflo|desplegar\s*agentes|genera(?:r)?\s+(?:todo|el\s+proyecto|proyecto\s+completo)|lanzar\s+agentes)/i;
   if (swarmKeywords.test(text)) {
     addMsg('assistant', '🎨 <strong>Abriendo Wizard de Estilo</strong> — Selecciona el estilo visual antes de generar para que todos los renders sean coherentes.');
     setTimeout(() => openStyleWizard(), 300);
+    __chatProcessing = false;
     return;
   }
 
@@ -3379,10 +3439,15 @@ async function sendChat() {
     addMsg('assistant', `🎨 Generando <strong>${built.space}</strong> — zona ${geo.label}:<br>• Piso: ${built.materials.floor}<br>• Paredes: ${built.materials.wall}<br>• Acabados: ${built.materials.finish}<br>• Mobiliario: ${built.furniture.slice(0,2).join(', ')}<br>• Estilo: ${built.variant}`);
     renderQueue.push({ prompt: built.prompt, label: built.space });
     processRenderQueue();
+    __chatProcessing = false;
     return;
   }
   
+  __chatProcessing = true;
+  __chatAbortController = new AbortController();
   const thinkEl = addThinking();
+  // Add stop button to thinking indicator
+  thinkEl.querySelector('.msg-bubble').innerHTML += ' <button onclick="stopChatResponse()" style="background:rgba(224,80,80,0.2);color:#e05;border:1px solid rgba(224,80,80,0.3);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;margin-left:8px">⏹ Detener</button>';
   const orKey = state.orKey;
   let model = document.getElementById('chat-model-select').value;
 
@@ -3449,7 +3514,8 @@ async function sendChat() {
       }
 
       const resp = await fetch(url, {
-        method: 'POST', signal: AbortSignal.timeout(30000),
+        method: 'POST',
+        signal: __chatAbortController ? __chatAbortController.signal : AbortSignal.timeout(30000),
         headers, body: JSON.stringify(body)
       });
 
@@ -3485,6 +3551,9 @@ async function sendChat() {
 
   if (!reply) {
     addMsg('assistant', `⚠️ Ningún modelo respondió. Último error: ${lastError}<br>Intenta de nuevo o cambia el modelo en el dropdown.`);
+    __chatProcessing = false;
+    __chatAbortController = null;
+    __processNextInQueue();
     return;
   }
 
@@ -3504,6 +3573,41 @@ async function sendChat() {
     videoTags.forEach(p => videoQueue.push({ prompt: p, label: p.split(',')[0].slice(0, 50) }));
     processVideoQueue();
   }
+
+  __chatProcessing = false;
+  __chatAbortController = null;
+  __processNextInQueue();
+}
+
+function stopChatResponse() {
+  if (__chatAbortController) {
+    __chatAbortController.abort();
+    __chatAbortController = null;
+  }
+  __chatProcessing = false;
+  // Remove thinking indicator
+  document.querySelectorAll('.msg-thinking').forEach(el => {
+    const msg = el.closest('.msg');
+    if (msg) msg.remove();
+  });
+  addMsg('assistant', '<span style="color:var(--muted)">⏹ Respuesta detenida</span>');
+  __processNextInQueue();
+}
+
+function __processNextInQueue() {
+  if (__chatQueue.length === 0) return;
+  const next = __chatQueue.shift();
+  // Remove the "en cola" message
+  const msgs = document.getElementById('chat-messages');
+  const allMsgs = msgs.querySelectorAll('.msg');
+  for (let i = allMsgs.length - 1; i >= 0; i--) {
+    if (allMsgs[i].textContent.includes('En cola')) { allMsgs[i].remove(); break; }
+  }
+  // Restore the queued message to input and re-send
+  state.pendingImages = next.images || [];
+  const inp = document.getElementById('chat-input');
+  inp.value = next.text;
+  setTimeout(() => sendChat(), 100);
 }
 
 function addMsg(role, text) {
