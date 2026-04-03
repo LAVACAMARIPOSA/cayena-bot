@@ -2921,7 +2921,7 @@ function removeEl(el) {
 // OpenRouter FREE models (same API key as chat!)
 // =============================================
 let __imgGenActive = 0;
-const __IMG_MAX_CONCURRENT = 3;
+const __IMG_MAX_CONCURRENT = 5;
 
 // OpenRouter dedicated image generation models (free!)
 const __OR_IMAGE_MODELS = [
@@ -2968,199 +2968,123 @@ async function generateImage(prompt, opts = {}) {
   __imgGenActive++;
 
   try {
-    // === LOCAL SD: Stable Diffusion / Draw Things / ComfyUI (unlimited, free) ===
+    // === RACE MODE: fire ALL providers simultaneously, first one wins ===
+    // This dramatically speeds up generation by not waiting sequentially
+
+    // Helper: convert blob/URL to data URL
+    async function __toDataUrl(blobOrUrl) {
+      let blob = blobOrUrl;
+      if (typeof blobOrUrl === 'string' && blobOrUrl.startsWith('http')) {
+        const r = await fetch(blobOrUrl, { signal: AbortSignal.timeout(15000) });
+        if (!r.ok) return blobOrUrl;
+        blob = await r.blob();
+      }
+      if (!(blob instanceof Blob)) return blobOrUrl;
+      return new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(blobOrUrl); r.readAsDataURL(blob); });
+    }
+
+    const providers = [];
+
+    // Provider 1: Local SD (if configured)
     const sdUrl = state.localSdUrl;
     if (sdUrl) {
-      try {
-        // Compatible with AUTOMATIC1111, Draw Things, Forge, ComfyUI API
+      providers.push(async () => {
         const sdResp = await fetch(`${sdUrl}/sdapi/v1/txt2img`, {
-          method: 'POST',
-          signal: AbortSignal.timeout(fast ? 60000 : 120000),
+          method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: `photorealistic architectural render, ${prompt}, high quality, 8k, professional photography`,
-            negative_prompt: 'cartoon, anime, drawing, sketch, low quality, blurry, text, watermark',
-            steps: fast ? 8 : 20,
-            cfg_scale: 7,
-            width: 1024,
-            height: 768,
-            sampler_name: 'DPM++ 2M',
-            scheduler: 'karras'
-          })
+          body: JSON.stringify({ prompt: `photorealistic architectural render, ${prompt}, high quality, 8k`, negative_prompt: 'cartoon, anime, sketch, low quality, blurry, text, watermark', steps: fast ? 8 : 20, cfg_scale: 7, width: 1024, height: 768, sampler_name: 'DPM++ 2M' })
         });
-        if (sdResp.ok) {
-          const sdData = await sdResp.json();
-          const b64 = sdData.images?.[0];
-          if (b64) {
-            console.log('Local SD: ✅ image generated!');
-            return `data:image/png;base64,${b64}`;
-          }
-        } else {
-          console.log(`Local SD: HTTP ${sdResp.status}`);
-        }
-      } catch(e) {
-        console.log('Local SD error:', e.message);
-      }
+        if (!sdResp.ok) throw new Error('SD HTTP ' + sdResp.status);
+        const d = await sdResp.json();
+        if (d.images?.[0]) { console.log('Local SD: ✅'); return `data:image/png;base64,${d.images[0]}`; }
+        throw new Error('No image');
+      });
     }
 
-    // === OPENROUTER: image generation (FREE, same key as chat!) ===
-    for (const model of __OR_IMAGE_MODELS) {
-      // Retry up to 2 times per model (handles 429 rate limits)
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
+    // Provider 2: OpenRouter Gemini (first model only for speed)
+    providers.push(async () => {
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST', signal: AbortSignal.timeout(fast ? 45000 : 90000),
+        headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+        body: JSON.stringify({ model: __OR_IMAGE_MODELS[0], messages: [{ role: 'user', content: [{ type: 'text', text: `Generate a high quality photorealistic image of: ${prompt}` }] }], modalities: ['image', 'text'] })
+      });
+      if (!resp.ok) throw new Error('OR HTTP ' + resp.status);
+      const d = await resp.json();
+      const url = __extractImageFromMsg(d.choices?.[0]?.message);
+      if (url) { console.log('OpenRouter: ✅'); return url; }
+      throw new Error('No image in response');
+    });
 
-          const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            signal: AbortSignal.timeout(fast ? 45000 : 90000),
-            headers: {
-              'Authorization': `Bearer ${state.orKey}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': location.href,
-              'X-Title': 'CayenaBot'
-            },
-            body: JSON.stringify({
-              model: model,
-              messages: [{
-                role: 'user',
-                content: [{ type: 'text', text: `Generate a high quality photorealistic image of: ${prompt}` }]
-              }],
-              modalities: ['image', 'text']
-            })
-          });
-
-          if (resp.status === 429) {
-            console.log(`OR image ${model}: rate limited (429), retrying...`);
-            await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
-            continue;
-          }
-
-          if (!resp.ok) {
-            const errText = await resp.text().catch(() => '');
-            console.log(`OR image ${model}: HTTP ${resp.status}`, errText.slice(0, 200));
-            break; // Don't retry non-429 errors, try next model
-          }
-
-          const d = await resp.json();
-          const msg = d.choices?.[0]?.message;
-          const imgUrl = __extractImageFromMsg(msg);
-
-          if (imgUrl) {
-            console.log(`OR image ${model}: ✅ image generated!`);
-            return imgUrl;
-          }
-
-          console.log(`OR image ${model}: response without image:`, JSON.stringify(msg).slice(0, 500));
-          break; // Got response but no image, try next model
-        } catch(e) {
-          console.log(`OR image ${model} attempt ${attempt}:`, e.message);
-        }
-      }
-    }
-
-    // === FALLBACK: AI Horde (truly free, unlimited, crowdsourced GPUs) ===
-    try {
-      console.log('Trying AI Horde...');
-      const hordeSubmit = await fetch('https://aihorde.net/api/v2/generate/async', {
-        method: 'POST',
-        signal: AbortSignal.timeout(10000),
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': '0000000000',
-          'Client-Agent': 'CayenaBot:1.0:cayenabot'
-        },
+    // Provider 3: AI Horde (fast settings)
+    providers.push(async () => {
+      const submitResp = await fetch('https://aihorde.net/api/v2/generate/async', {
+        method: 'POST', signal: AbortSignal.timeout(10000),
+        headers: { 'Content-Type': 'application/json', 'apikey': '0000000000', 'Client-Agent': 'CayenaBot:1.0:cayenabot' },
         body: JSON.stringify({
-          prompt: `photorealistic architectural render, luxury real estate, ${prompt}, high quality, professional real estate photography, 8k, no people, no text, no watermark ###  blurry, cartoon, anime, sketch, low quality, nsfw, nude, person`,
-          params: { width: 768, height: 512, steps: 25, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
+          prompt: `photorealistic architectural render, luxury real estate, ${prompt}, professional photography ### blurry, cartoon, anime, nsfw, nude, person`,
+          params: { width: 1024, height: 768, steps: 20, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
           models: ['AlbedoBase XL (SDXL)', 'SDXL 1.0', 'Deliberate', 'stable_diffusion'],
-          nsfw: true,
-          censor_nsfw: false,
-          r2: true,
-          replacement_filter: true
+          nsfw: true, censor_nsfw: false, r2: true, replacement_filter: true
         })
       });
-      if (hordeSubmit.ok) {
-        const { id } = await hordeSubmit.json();
-        if (id) {
-          // Poll for completion (max ~90s for fast, ~180s otherwise)
-          const maxWait = fast ? 90000 : 180000;
-          const startTime = Date.now();
-          while (Date.now() - startTime < maxWait) {
-            await new Promise(r => setTimeout(r, 3000));
-            try {
-              const checkResp = await fetch(`https://aihorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
-              if (checkResp.ok) {
-                const status = await checkResp.json();
-                if (status.done) {
-                  const resultResp = await fetch(`https://aihorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(10000) });
-                  if (resultResp.ok) {
-                    const result = await resultResp.json();
-                    const imgUrl = result.generations?.[0]?.img;
-                    if (imgUrl) {
-                      console.log('AI Horde: ✅ image generated! Converting to data URL...');
-                      // Convert R2 URL to base64 data URL (R2 URLs are temporary and blocked by Pannellum CORS)
-                      try {
-                        const imgResp = await fetch(imgUrl, { signal: AbortSignal.timeout(15000) });
-                        if (imgResp.ok) {
-                          const blob = await imgResp.blob();
-                          return await new Promise(resolve => {
-                            const reader = new FileReader();
-                            reader.onload = () => resolve(reader.result);
-                            reader.onerror = () => resolve(imgUrl); // fallback to URL
-                            reader.readAsDataURL(blob);
-                          });
-                        }
-                      } catch(e) {
-                        console.log('AI Horde: could not convert to data URL, using raw URL');
-                      }
-                      return imgUrl;
-                    }
-                  }
-                  break;
-                }
-                if (status.faulted) break;
-              }
-            } catch(e) { /* continue polling */ }
-          }
-          console.log('AI Horde: timeout or no result');
+      if (!submitResp.ok) throw new Error('Horde submit HTTP ' + submitResp.status);
+      const { id } = await submitResp.json();
+      if (!id) throw new Error('No job ID');
+      const maxWait = fast ? 75000 : 150000;
+      const t0 = Date.now();
+      while (Date.now() - t0 < maxWait) {
+        await new Promise(r => setTimeout(r, 2500));
+        const ck = await fetch(`https://aihorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
+        if (!ck.ok) continue;
+        const st = await ck.json();
+        if (st.faulted) throw new Error('Faulted');
+        if (st.done) {
+          const res = await fetch(`https://aihorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(10000) });
+          if (!res.ok) throw new Error('Status HTTP ' + res.status);
+          const data = await res.json();
+          const imgUrl = data.generations?.[0]?.img;
+          if (!imgUrl) throw new Error('No image');
+          console.log('AI Horde: ✅');
+          return await __toDataUrl(imgUrl);
         }
       }
-    } catch(e) {
-      console.log('AI Horde error:', e.message);
-    }
+      throw new Error('Timeout');
+    });
 
-    // === FALLBACK 2: CORS proxy → Pollinations ===
+    // Provider 4: Pollinations via CORS proxy
     const seed = Date.now() + Math.floor(Math.random() * 10000);
-    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&model=flux&nologo=true&seed=${seed}`;
-    const proxies = [
-      `https://corsproxy.io/?url=${encodeURIComponent(pollUrl)}`,
-      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(pollUrl)}`
-    ];
-    for (const pUrl of proxies) {
-      try {
-        const r = await fetch(pUrl, { signal: AbortSignal.timeout(fast ? 25000 : 50000) });
-        if (!r.ok) continue;
-        const blob = await r.blob();
-        if (blob.size > 1000 && blob.type.startsWith('image')) return URL.createObjectURL(blob);
-      } catch(e) { /* next proxy */ }
-    }
+    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 200))}?width=1024&height=768&model=flux&nologo=true&seed=${seed}`;
+    providers.push(async () => {
+      const pUrl = `https://corsproxy.io/?url=${encodeURIComponent(pollUrl)}`;
+      const r = await fetch(pUrl, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
+      if (!r.ok) throw new Error('Pollinations HTTP ' + r.status);
+      const blob = await r.blob();
+      if (blob.size < 1000 || !blob.type.startsWith('image')) throw new Error('Not an image');
+      console.log('Pollinations: ✅');
+      return await __toDataUrl(blob);
+    });
 
-    // === FALLBACK 3: Together.ai ===
+    // Provider 5: Together.ai (if key available)
     const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
     if (togetherKey) {
-      try {
+      providers.push(async () => {
         const r = await fetch('https://api.together.xyz/v1/images/generations', {
           method: 'POST', signal: AbortSignal.timeout(30000),
           headers: { 'Authorization': `Bearer ${togetherKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell-Free', prompt, width: 1024, height: 768, steps: 4, n: 1, response_format: 'b64_json' })
         });
-        if (r.ok) {
-          const d = await r.json();
-          const b64 = d.data?.[0]?.b64_json;
-          if (b64) return `data:image/png;base64,${b64}`;
-        }
-      } catch(e) { /* skip */ }
+        if (!r.ok) throw new Error('Together HTTP ' + r.status);
+        const d = await r.json();
+        const b64 = d.data?.[0]?.b64_json;
+        if (!b64) throw new Error('No b64');
+        console.log('Together: ✅');
+        return `data:image/png;base64,${b64}`;
+      });
     }
+
+    // RACE: first provider to return a valid image wins
+    const result = await Promise.any(providers.map(fn => fn()));
+    if (result) return result;
 
     return null;
   } finally {
@@ -3870,7 +3794,7 @@ async function runSwarm(projectInfo) {
   }
 
   // Phase 2: Run render agents in batches of 3 (balance speed vs rate limits)
-  const RENDER_BATCH = 3;
+  const RENDER_BATCH = 5;
   swarmLog('Coordinator', `🎨 Fase 2: ${renderAgents.length} renders (${RENDER_BATCH} simultáneos)`);
   for (let i = 0; i < renderAgents.length; i += RENDER_BATCH) {
     const batch = renderAgents.slice(i, i + RENDER_BATCH);
@@ -3880,7 +3804,7 @@ async function runSwarm(projectInfo) {
     await Promise.allSettled(batch.map(agent => executeAgent(agent)));
     // Pause between batches
     if (i + RENDER_BATCH < renderAgents.length) {
-      await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
+      await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
     }
   }
 
