@@ -859,9 +859,10 @@ function doLogin() {
   const pass = document.getElementById('login-pass').value.trim();
   const errEl = document.getElementById('login-error');
   if (user === 'OHANA' && pass === '121174') {
+    // Show project selector (not the app directly)
     document.getElementById('login-screen').style.display = 'none';
-    localStorage.setItem('cayenabot_auth', 'true');
-    // Show tutorial on first login
+    document.getElementById('project-selector').style.display = '';
+    refreshProjectList();
     if (!localStorage.getItem('cayenabot_tutorial_seen')) {
       setTimeout(() => showTutorial(), 500);
     }
@@ -871,9 +872,165 @@ function doLogin() {
     document.getElementById('login-pass').value = '';
   }
 }
-// Auto-login if already authenticated
-if (localStorage.getItem('cayenabot_auth') === 'true') {
-  document.getElementById('login-screen').style.display = 'none';
+// Always show login — no auto-login
+</script>
+
+<!-- PROJECT SELECTOR (like ChatGPT conversation list) -->
+<div id="project-selector" style="display:none;position:fixed;inset:0;z-index:99998;background:linear-gradient(135deg,#0a0a1a 0%,#1a1a2e 50%,#0d1117 100%)">
+  <div style="max-width:800px;margin:0 auto;padding:30px 20px;height:100vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+      <div>
+        <h1 style="color:#fff;font-size:24px;margin:0;font-weight:800">🏗️ CayenaBot</h1>
+        <p style="color:var(--muted);font-size:13px;margin:4px 0 0">Selecciona un proyecto o crea uno nuevo</p>
+      </div>
+      <button onclick="localStorage.removeItem('cayenabot_auth');document.getElementById('project-selector').style.display='none';document.getElementById('login-screen').style.display=''" style="background:var(--card);color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer">🚪 Cerrar sesión</button>
+    </div>
+    <button onclick="startNewProject()" style="width:100%;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:12px;padding:16px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:20px;transition:transform 0.2s" onmouseenter="this.style.transform='scale(1.01)'" onmouseleave="this.style.transform='scale(1)'">➕ Nuevo Proyecto</button>
+    <div style="font-size:13px;color:var(--muted);font-weight:600;margin-bottom:10px">Proyectos guardados</div>
+    <div id="project-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
+    <p style="text-align:center;color:rgba(255,255,255,0.15);font-size:11px;margin-top:16px">Los proyectos se guardan en tu navegador · Exporta para respaldar</p>
+  </div>
+</div>
+
+<script>
+function refreshProjectList() {
+  const list = document.getElementById('project-list');
+  const projects = getAllSavedProjects();
+  if (projects.length === 0) {
+    list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">📂</div><div style="font-size:15px">No hay proyectos guardados</div><div style="font-size:12px;margin-top:4px">Crea uno nuevo para empezar</div></div>';
+    return;
+  }
+  list.innerHTML = projects.map((p, i) => {
+    const imgCount = Object.keys(p.images || {}).length;
+    const sceneCount = Object.keys(p.scenes || {}).length;
+    const date = p.savedAt ? new Date(p.savedAt).toLocaleDateString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha';
+    const thumb = Object.values(p.images || {})[0]?.src || '';
+    return `<div class="project-card" onclick="loadProject(${i})" style="display:flex;gap:14px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;cursor:pointer;transition:all 0.2s" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(196,119,59,0.05)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.06)';this.style.background='rgba(255,255,255,0.03)'">
+      ${thumb ? `<img src="${thumb}" style="width:72px;height:52px;border-radius:8px;object-fit:cover;flex-shrink:0">` : '<div style="width:72px;height:52px;border-radius:8px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">🏗️</div>'}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name || 'Sin nombre'}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.location || 'Sin ubicación'}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:10px">
+          <span>🖼️ ${imgCount} imgs</span><span>🧭 ${sceneCount} escenas</span><span>📅 ${date}</span>
+        </div>
+      </div>
+      <button onclick="event.stopPropagation();deleteProject(${i})" style="background:none;border:none;color:rgba(224,80,80,0.5);font-size:16px;cursor:pointer;padding:4px;align-self:start" title="Eliminar">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function getAllSavedProjects() {
+  const projects = [];
+  try {
+    // Get all project keys from localStorage
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key.startsWith('cayenabot_proj_')) {
+        try {
+          const p = JSON.parse(localStorage.getItem(key));
+          p.__storageKey = key;
+          projects.push(p);
+        } catch(e) {}
+      }
+    }
+    // Also check legacy key
+    const legacy = localStorage.getItem('cayenabot_project');
+    if (legacy) {
+      try {
+        const p = JSON.parse(legacy);
+        if (p && (p.name || Object.keys(p.images || {}).length > 0)) {
+          p.__storageKey = 'cayenabot_project';
+          // Migrate: save with proper key
+          const newKey = 'cayenabot_proj_' + (p.savedAt ? new Date(p.savedAt).getTime() : Date.now());
+          localStorage.setItem(newKey, legacy);
+          localStorage.removeItem('cayenabot_project');
+          p.__storageKey = newKey;
+          projects.push(p);
+        }
+      } catch(e) {}
+    }
+  } catch(e) {}
+  // Sort by date, newest first
+  projects.sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
+  return projects;
+}
+
+function startNewProject() {
+  document.getElementById('project-selector').style.display = 'none';
+  newProject(true);
+  // Generate a unique project key for this session
+  state.__currentProjectKey = 'cayenabot_proj_' + Date.now();
+  const chatEl = document.getElementById('chat-messages');
+  if (chatEl) chatEl.innerHTML = '<div class="msg msg-assistant fade-enter"><div class="msg-bubble">🏗️ <strong>Nuevo proyecto</strong> — Cuéntame: nombre, ubicación, tipo de unidades y estilo.</div></div>';
+}
+
+function loadProject(idx) {
+  const projects = getAllSavedProjects();
+  const p = projects[idx];
+  if (!p) return;
+
+  document.getElementById('project-selector').style.display = 'none';
+  newProject(true);
+
+  // Restore project data
+  if (p.images) Object.assign(IMG, p.images);
+  if (p.scenes) Object.assign(SCENES, p.scenes);
+  if (p.units && Array.isArray(p.units)) UNITS.push(...p.units);
+  if (p.floorPlans) Object.assign(FLOOR_PLANS, p.floorPlans);
+  state.projectName = p.name || '';
+  state.projectLocation = p.location || '';
+  if (p.styleDNA) state.__styleDNA = p.styleDNA;
+  if (p.styleSeed) state.__styleSeed = p.styleSeed;
+  if (p.chatHistory) state.chatHistory = p.chatHistory;
+  state.__currentProjectKey = p.__storageKey;
+
+  // Populate builder fields
+  const bName = document.getElementById('b-name');
+  const bLoc = document.getElementById('b-location');
+  const bLocCtx = document.getElementById('b-location-context');
+  const bDesc = document.getElementById('b-description');
+  if (bName && p.name) bName.value = p.name;
+  if (bLoc && p.location) bLoc.value = p.location;
+  if (bLocCtx && p.locationContext) bLocCtx.value = p.locationContext;
+  if (bDesc && p.description) bDesc.value = p.description;
+
+  // Restore chat
+  if (p.chatHistory && p.chatHistory.length > 0) {
+    const chatEl = document.getElementById('chat-messages');
+    if (chatEl) {
+      chatEl.innerHTML = p.chatHistory.map(m =>
+        `<div class="msg msg-${m.role}"><div class="msg-bubble">${m.content}</div></div>`
+      ).join('');
+    }
+  }
+
+  // Set first scene
+  const first = p.currentScene || Object.keys(SCENES)[0];
+  if (first && SCENES[first]) state.currentScene = first;
+
+  buildGallery();
+  if (typeof buildUnits === 'function') buildUnits();
+  updateMinimap();
+  if (typeof buildFloorPlans === 'function') buildFloorPlans();
+  setTimeout(() => { window.__tourInited = false; initTourEngine(); }, 300);
+
+  showToast(`📂 Proyecto cargado: ${p.name || 'Sin nombre'}`);
+}
+
+function deleteProject(idx) {
+  const projects = getAllSavedProjects();
+  const p = projects[idx];
+  if (!p) return;
+  if (!confirm(`¿Eliminar "${p.name || 'Sin nombre'}"? Esta acción no se puede deshacer.`)) return;
+  try {
+    localStorage.removeItem(p.__storageKey);
+    // Also remove checkpoints
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('cayenabot_checkpoint_')) localStorage.removeItem(key);
+    }
+  } catch(e) {}
+  refreshProjectList();
 }
 </script>
 
@@ -894,6 +1051,7 @@ if (localStorage.getItem('cayenabot_auth') === 'true') {
     <button class="nav-btn" onclick="switchTab('builder')">🔨 Builder</button>
   </nav>
   <div id="header-right">
+    <button onclick="__autoSaveProject();document.getElementById('project-selector').style.display='';refreshProjectList()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--muted);font-size:12px;cursor:pointer" title="Mis Proyectos">📂 Proyectos</button>
     <button id="chat-toggle-btn" onclick="toggleWorkspace()">📐 Preview</button>
     <button id="settings-btn" onclick="openSettings()">⚙️</button>
   </div>
@@ -5783,8 +5941,9 @@ function showToast(msg) {
 // SAVE / LOAD / EXPORT / NEW PROJECT
 // =============================================
 function saveProject() {
-  const project = { name: state.projectName || 'Mi Proyecto', location: state.projectLocation || '', images: IMG, scenes: SCENES, units: UNITS, floorPlans: FLOOR_PLANS, chatHistory: state.chatHistory.slice(-50), currentScene: state.currentScene, savedAt: new Date().toISOString() };
-  try { localStorage.setItem('cayenabot_project', JSON.stringify(project)); showToast('💾 Proyecto guardado'); }
+  if (!state.__currentProjectKey) state.__currentProjectKey = 'cayenabot_proj_' + Date.now();
+  const project = { name: state.projectName || document.getElementById('b-name')?.value?.trim() || 'Mi Proyecto', location: state.projectLocation || document.getElementById('b-location')?.value?.trim() || '', images: IMG, scenes: SCENES, units: UNITS, floorPlans: FLOOR_PLANS, chatHistory: state.chatHistory.slice(-50), currentScene: state.currentScene, savedAt: new Date().toISOString(), version: 3 };
+  try { localStorage.setItem(state.__currentProjectKey, JSON.stringify(project)); showToast('💾 Proyecto guardado'); }
   catch(e) { exportProject(); }
 }
 
@@ -5840,7 +5999,9 @@ function __autoSaveProject() {
       savedAt: new Date().toISOString(),
       version: 3
     };
-    localStorage.setItem('cayenabot_project', JSON.stringify(saveData));
+    // Save to current project key (unique per project)
+    if (!state.__currentProjectKey) state.__currentProjectKey = 'cayenabot_proj_' + Date.now();
+    localStorage.setItem(state.__currentProjectKey, JSON.stringify(saveData));
 
     // Also save checkpoint with timestamp (keep last 3)
     const checkpointKey = `cayenabot_checkpoint_${Date.now()}`;
@@ -6150,8 +6311,7 @@ function init() {
   const savedSdUrl = localStorage.getItem('cayenabot_local_sd_url');
   if (savedSdUrl) state.localSdUrl = savedSdUrl;
   
-  // Load auto-saved project (like ChatGPT restoring conversations)
-  __loadAutoSave();
+  // Don't auto-load — user selects project from project selector after login
   __setupAutoSave();
 
   // Init tour UI
