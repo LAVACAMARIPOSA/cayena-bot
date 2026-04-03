@@ -5316,26 +5316,81 @@ Responde en español. Sé técnico y profesional. Si piden modificaciones, expli
 }
 
 async function renderUploadedPlan(src, btn) {
-  const resultDiv = document.getElementById('uploaded-plan-result');
-  btn.disabled = true;
-  btn.textContent = '⏳ Generando render...';
-  resultDiv.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><p style="margin-top:10px;font-size:13px;color:var(--muted)">FLUX AI procesando tu plano...</p></div>';
-  
+  // Use the actual plan image, not just a text prompt
+  const planSrc = src || state.__currentPlanSrc;
+  if (!planSrc) { showToast('⚠️ No hay plano cargado'); return; }
+
+  const resultDiv = document.getElementById('uploaded-plan-result') || document.getElementById('plan-visual-result');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando...'; }
+
+  // Show loading in the plan chat
+  addPlanChat('ai', '⏳ Generando render 3D fotorrealista de tu plano... (30-90s)');
+
   try {
-    const prompt = `Transform this architectural floor plan into a photorealistic luxury Caribbean property render. Top-down 3D view showing the actual layout with premium finishes, tropical landscaping, pools, marble floors. Professional architectural visualization. 8K ultra-realistic photography style.`;
-    const imgUrl = await generateImage(prompt);
-    if (!imgUrl) throw new Error('No se pudo generar');
-    resultDiv.innerHTML = `
-      <div style="font-size:12px;color:var(--gold);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.1em">✨ Render Generado</div>
-      <img src="${imgUrl}" style="width:100%;border-radius:10px">
-    `;
-    btn.textContent = '🔄 Regenerar';
-    btn.disabled = false;
+    // Method 1: Use Gemini with image input → image output (best quality, uses actual plan)
+    const gemResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal: AbortSignal.timeout(120000),
+      headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-image-preview:free',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: planSrc } },
+            { type: 'text', text: `Transform this architectural floor plan into a stunning photorealistic top-down 3D architectural visualization.
+Show the EXACT same layout as the floor plan but rendered as a beautiful 3D dollhouse view with:
+- Realistic walls, doors, and windows matching the plan
+- Premium flooring (marble, hardwood) in each room
+- Furniture placed appropriately in each space
+- Pools shown with realistic blue water
+- Lush tropical landscaping in outdoor areas
+- Warm golden hour lighting
+- Professional architectural photography quality
+Keep the same proportions and layout as the original plan. This is for a luxury real estate project.` }
+          ]
+        }],
+        modalities: ['image', 'text']
+      })
+    });
+
+    let imgUrl = null;
+    if (gemResp.ok) {
+      const d = await gemResp.json();
+      imgUrl = __extractImageFromMsg(d.choices?.[0]?.message);
+    }
+
+    // Method 2: Fallback to regular image generation with detailed prompt from plan analysis
+    if (!imgUrl) {
+      const analysis = state.__planAnalysis || '';
+      const prompt = `Photorealistic top-down 3D dollhouse view of a luxury residential complex. ${analysis.slice(0, 300)}. Premium Caribbean architecture, marble floors, infinity pools, tropical landscaping, golden hour lighting, 8K professional architectural visualization.`;
+      imgUrl = await generateImage(prompt);
+    }
+
+    // Remove loading message
+    const chat = document.getElementById('plan-chat');
+    if (chat && chat.lastChild) chat.lastChild.remove();
+
+    if (imgUrl) {
+      addPlanChat('ai', '✅ Render 3D generado basado en tu plano:');
+      // Show in visual result area
+      const visResult = document.getElementById('plan-visual-result');
+      if (visResult) {
+        document.getElementById('plan-modified-img').src = imgUrl;
+        visResult.style.display = '';
+      }
+      // Also add to gallery
+      addRenderToGallery(imgUrl, 'Render 3D del Plano');
+    } else {
+      addPlanChat('ai', '⚠️ No se pudo generar el render. Intenta de nuevo.');
+    }
   } catch(e) {
-    resultDiv.innerHTML = `<div style="color:var(--red);font-size:13px">⚠️ ${e.message}</div>`;
-    btn.textContent = '✨ Reintentar';
-    btn.disabled = false;
+    const chat = document.getElementById('plan-chat');
+    if (chat && chat.lastChild) chat.lastChild.remove();
+    addPlanChat('ai', `❌ Error: ${e.message}`);
   }
+
+  if (btn) { btn.disabled = false; btn.textContent = '✨ Generar Render 3D'; }
 }
 
 // =============================================
