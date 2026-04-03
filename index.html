@@ -929,17 +929,49 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         </div>
         
         <!-- Upload own plan -->
-        <div id="plan-upload-area" style="border:2px dashed var(--border);border-radius:16px;padding:28px;text-align:center;margin-bottom:28px;cursor:pointer;transition:border-color 0.2s" 
+        <!-- Upload plan -->
+        <div id="plan-upload-area" style="border:2px dashed var(--border);border-radius:16px;padding:28px;text-align:center;margin-bottom:28px;cursor:pointer;transition:border-color 0.2s"
              onclick="document.getElementById('plan-file-input').click()"
              ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
              ondragleave="this.style.borderColor='var(--border)'"
              ondrop="handlePlanDrop(event)">
           <div style="font-size:36px;margin-bottom:8px">📐</div>
-          <div style="font-size:15px;font-weight:600;margin-bottom:4px">Sube tu propio plano</div>
-          <div style="font-size:13px;color:var(--muted)">Arrastra aquí o haz click → FLUX AI genera una vista 3D fotorrealista</div>
+          <div style="font-size:15px;font-weight:600;margin-bottom:4px">Sube tu plano arquitectónico</div>
+          <div style="font-size:13px;color:var(--muted)">La AI analizará las unidades, áreas y distribución. Luego podrás pedir modificaciones.</div>
           <input type="file" id="plan-file-input" accept="image/*" style="display:none" onchange="handlePlanUpload(event)">
         </div>
-        
+
+        <!-- Plan analysis + chat area -->
+        <div id="plan-workspace" style="display:none">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+            <div style="background:var(--card);border-radius:12px;overflow:hidden;border:1px solid var(--border)">
+              <img id="plan-original-img" style="width:100%;display:block">
+              <div style="padding:10px;font-size:12px;color:var(--muted);text-align:center">Plano Original</div>
+            </div>
+            <div style="background:var(--card);border-radius:12px;border:1px solid var(--border);overflow:hidden">
+              <div id="plan-analysis" style="padding:16px;font-size:13px;color:var(--text);max-height:300px;overflow-y:auto">
+                <div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:8px;color:var(--muted)">Analizando plano...</div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modification chat -->
+          <div style="background:var(--card);border-radius:12px;border:1px solid var(--border);padding:16px">
+            <h4 style="margin:0 0 10px;color:var(--gold);font-size:14px">💬 Pide modificaciones al plano</h4>
+            <div id="plan-chat" style="max-height:200px;overflow-y:auto;margin-bottom:12px;font-size:13px"></div>
+            <div style="display:flex;gap:8px">
+              <input id="plan-chat-input" type="text" placeholder="Ej: Agrega un dormitorio extra a la unidad E-4, haz la piscina 2m más ancha..." style="flex:1;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:13px" onkeydown="if(event.key==='Enter')sendPlanModification()">
+              <button onclick="sendPlanModification()" style="background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer">Enviar</button>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+              <button onclick="document.getElementById('plan-chat-input').value='Analiza las medidas y distribución de cada unidad';sendPlanModification()" style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--muted);cursor:pointer">📏 Analizar medidas</button>
+              <button onclick="document.getElementById('plan-chat-input').value='¿Qué mejoras arquitectónicas recomiendas para este diseño?';sendPlanModification()" style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--muted);cursor:pointer">💡 Sugerir mejoras</button>
+              <button onclick="document.getElementById('plan-chat-input').value='Calcula los metros cuadrados de cada unidad y áreas comunes';sendPlanModification()" style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--muted);cursor:pointer">📐 Calcular m²</button>
+              <button onclick="renderUploadedPlan(document.getElementById('plan-original-img').src, this)" style="font-size:11px;background:rgba(196,119,59,0.2);border:1px solid var(--gold);border-radius:6px;padding:4px 10px;color:var(--gold);cursor:pointer;font-weight:600">✨ Generar Render 3D</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Floor plans grid -->
         <div id="floor-plans-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px"></div>
       </div>
@@ -4626,18 +4658,134 @@ function handlePlanUpload(event) {
 }
 
 async function processUploadedPlan(file) {
-  const area = document.getElementById('plan-upload-area');
   const reader = new FileReader();
   reader.onload = async (e) => {
     const src = e.target.result;
-    area.innerHTML = `
-      <img src="${src}" style="max-height:200px;border-radius:10px;margin-bottom:12px">
-      <div style="font-size:14px;font-weight:600;margin-bottom:8px">${file.name}</div>
-      <button onclick="renderUploadedPlan('${src}', this)" style="padding:10px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;font-size:14px;font-weight:700;cursor:pointer">✨ Generar Render 3D con FLUX AI</button>
-      <div id="uploaded-plan-result" style="margin-top:16px"></div>
-    `;
+    state.__currentPlanSrc = src;
+
+    // Show workspace
+    document.getElementById('plan-upload-area').style.display = 'none';
+    document.getElementById('plan-workspace').style.display = '';
+    document.getElementById('plan-original-img').src = src;
+    document.getElementById('plan-chat').innerHTML = '';
+
+    // Also save to FLOOR_PLANS
+    const key = 'uploaded_' + Date.now();
+    FLOOR_PLANS[key] = { src, label: file.name };
+    buildFloorPlans();
+
+    // Analyze with AI vision
+    const analysisDiv = document.getElementById('plan-analysis');
+    analysisDiv.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:8px;color:var(--muted)">Analizando plano con AI...</div></div>';
+
+    try {
+      // Use vision model to analyze the floor plan
+      const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
+
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        signal: AbortSignal.timeout(60000),
+        headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+        body: JSON.stringify({
+          model: visionModel,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: src } },
+              { type: 'text', text: `Eres un arquitecto experto analizando este plano arquitectónico. Analiza en detalle:
+
+1. **Unidades identificadas**: lista cada unidad/apartamento con su nombre/código (E-1, E-2, etc.)
+2. **Distribución**: habitaciones, baños, cocina, sala de cada unidad que puedas identificar
+3. **Áreas comunes**: piscinas, estacionamiento, jardines, pasillos, lobby
+4. **Medidas visibles**: cualquier medida que puedas leer en el plano
+5. **Observaciones técnicas**: orientación, accesos, flujo de circulación
+
+Responde en español. Sé específico con nombres/códigos de unidades visibles.` }
+            ]
+          }]
+        })
+      });
+
+      if (resp.ok) {
+        const d = await resp.json();
+        const text = d.choices?.[0]?.message?.content || 'No se pudo analizar';
+        analysisDiv.innerHTML = `<div style="font-size:12px;color:var(--gold);margin-bottom:8px;font-weight:600">📋 Análisis del Plano</div><div style="white-space:pre-wrap;line-height:1.5">${text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</div>`;
+        state.__planAnalysis = text;
+
+        // Add to plan chat
+        addPlanChat('ai', '📋 Plano analizado. Puedes pedirme modificaciones, cálculos de m², sugerencias de mejoras, o generar renders 3D.');
+      } else {
+        analysisDiv.innerHTML = `<div style="color:#e05">❌ Error analizando: HTTP ${resp.status}</div>`;
+      }
+    } catch(e) {
+      analysisDiv.innerHTML = `<div style="color:#e05">❌ ${e.message}</div>`;
+    }
   };
   reader.readAsDataURL(file);
+}
+
+function addPlanChat(role, text) {
+  const chat = document.getElementById('plan-chat');
+  const isAi = role === 'ai';
+  chat.innerHTML += `<div style="margin-bottom:8px;padding:8px 12px;background:${isAi ? 'rgba(196,119,59,0.1)' : 'rgba(74,124,247,0.1)'};border-radius:8px;border-left:3px solid ${isAi ? 'var(--gold)' : 'var(--blue)'}">${text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</div>`;
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function sendPlanModification() {
+  const input = document.getElementById('plan-chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  addPlanChat('user', text);
+  addPlanChat('ai', '<div class="spinner" style="width:16px;height:16px"></div> Analizando...');
+
+  try {
+    const planSrc = state.__currentPlanSrc;
+    const prevAnalysis = state.__planAnalysis || '';
+
+    const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
+
+    const messages = [
+      { role: 'system', content: `Eres un arquitecto e ingeniero civil experto. Estás analizando un plano arquitectónico. Análisis previo del plano: ${prevAnalysis.slice(0, 2000)}. Responde en español. Sé técnico y preciso.` }
+    ];
+
+    // Include the plan image if available
+    if (planSrc) {
+      messages.push({
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: planSrc } },
+          { type: 'text', text: text }
+        ]
+      });
+    } else {
+      messages.push({ role: 'user', content: text });
+    }
+
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal: AbortSignal.timeout(60000),
+      headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+      body: JSON.stringify({ model: visionModel, messages })
+    });
+
+    // Remove "Analizando..." message
+    const chat = document.getElementById('plan-chat');
+    chat.lastChild.remove();
+
+    if (resp.ok) {
+      const d = await resp.json();
+      const reply = d.choices?.[0]?.message?.content || 'Sin respuesta';
+      addPlanChat('ai', reply);
+    } else {
+      addPlanChat('ai', `❌ Error: HTTP ${resp.status}`);
+    }
+  } catch(e) {
+    const chat = document.getElementById('plan-chat');
+    if (chat.lastChild) chat.lastChild.remove();
+    addPlanChat('ai', `❌ ${e.message}`);
+  }
 }
 
 async function renderUploadedPlan(src, btn) {
