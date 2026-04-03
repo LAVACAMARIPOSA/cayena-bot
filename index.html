@@ -2913,9 +2913,29 @@ let swarmState = {
 function openSwarm() {
   document.getElementById('swarm-overlay').classList.add('open');
   document.getElementById('swarm-toggle-btn').style.display = '';
+  const reopenBtn = document.getElementById('swarm-reopen-btn');
+  if (reopenBtn) reopenBtn.style.display = 'none';
 }
 function closeSwarm() {
   document.getElementById('swarm-overlay').classList.remove('open');
+  // Show a floating button to reopen (always visible after first swarm run)
+  let reopenBtn = document.getElementById('swarm-reopen-btn');
+  if (!reopenBtn && swarmState.agents.length > 0) {
+    reopenBtn = document.createElement('button');
+    reopenBtn.id = 'swarm-reopen-btn';
+    reopenBtn.onclick = openSwarm;
+    reopenBtn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:50px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 20px rgba(196,119,59,0.4);transition:transform 0.2s';
+    reopenBtn.onmouseenter = () => reopenBtn.style.transform = 'scale(1.05)';
+    reopenBtn.onmouseleave = () => reopenBtn.style.transform = 'scale(1)';
+    document.body.appendChild(reopenBtn);
+  }
+  if (reopenBtn) {
+    const done = swarmState.agents.filter(a => a.status === 'done').length;
+    const total = swarmState.agents.length;
+    const renders = swarmState.agents.filter(a => a.renderUrl).length;
+    reopenBtn.innerHTML = `⚡ Swarm (${done}/${total})${renders ? ' — 🎨 ' + renders + ' renders' : ''}`;
+    reopenBtn.style.display = '';
+  }
 }
 function toggleSwarmPanel() {
   const overlay = document.getElementById('swarm-overlay');
@@ -2956,7 +2976,7 @@ function createAgentCards(agents) {
   const grid = document.getElementById('swarm-grid');
   grid.innerHTML = agents.map(a => {
     const type = SWARM_AGENT_TYPES[a.type] || SWARM_AGENT_TYPES.coordinator;
-    return `<div class="swarm-agent" id="sa-${a.id}">
+    return `<div class="swarm-agent" id="sa-${a.id}" onclick="showAgentDetail(${a.id})" style="cursor:pointer">
       <div class="sa-header">
         <span class="sa-id">#${String(a.id).padStart(3,'0')}</span>
         <div class="sa-status pending"></div>
@@ -2964,8 +2984,44 @@ function createAgentCards(agents) {
       <div class="sa-name">${type.icon} ${a.name}</div>
       <div class="sa-task">${a.task}</div>
       <div class="sa-bar"><div class="sa-bar-fill" style="width:0%"></div></div>
+      <div class="sa-preview" id="sa-preview-${a.id}" style="display:none;margin-top:6px"></div>
     </div>`;
   }).join('');
+}
+
+function showAgentDetail(agentId) {
+  const agent = swarmState.agents.find(a => a.id === agentId);
+  if (!agent) return;
+  const preview = document.getElementById('sa-preview-' + agentId);
+  if (!preview) return;
+
+  // Toggle: if already visible, hide it
+  if (preview.style.display !== 'none') {
+    preview.style.display = 'none';
+    return;
+  }
+
+  let html = '';
+  const statusLabel = agent.status === 'done' ? '✅ Completado' : agent.status === 'error' ? '❌ Error' : agent.status === 'active' ? '⚡ Activo' : '⏳ Pendiente';
+  html += `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">${statusLabel} — ${agent.task}</div>`;
+
+  if (agent.renderUrl) {
+    html += `<img src="${agent.renderUrl}" style="width:100%;border-radius:8px;margin-top:4px" onerror="this.style.display='none'">`;
+    html += `<div style="font-size:10px;color:var(--gold);margin-top:4px">🎨 Render generado</div>`;
+  } else if (agent.type === 'render' && agent.status === 'done') {
+    html += `<div style="font-size:10px;color:var(--muted)">⚠️ No se pudo generar imagen</div>`;
+  } else if (agent.type === 'render' && agent.status !== 'done') {
+    html += `<div style="font-size:10px;color:var(--muted)">⏳ Render en progreso...</div>`;
+  } else {
+    html += `<div style="font-size:10px;color:var(--muted)">📋 Agente de ${agent.type || 'coordinación'}</div>`;
+  }
+
+  if (agent.prompt) {
+    html += `<div style="font-size:9px;color:var(--muted);margin-top:4px;opacity:0.7;word-break:break-word">Prompt: ${agent.prompt.slice(0, 120)}...</div>`;
+  }
+
+  preview.innerHTML = html;
+  preview.style.display = 'block';
 }
 
 // Decompose a project generation request into ~100 agent tasks
@@ -3087,6 +3143,7 @@ async function executeAgent(agent) {
       try {
         const imgUrl = await generateImage(agent.prompt, { fast: true });
         if (imgUrl) {
+          agent.renderUrl = imgUrl;
           addRenderToGallery(imgUrl, agent.task);
           swarmLog(agent.name, `✅ Render generado: ${agent.task}`, 'ok');
         } else {
