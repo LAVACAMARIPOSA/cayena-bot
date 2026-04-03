@@ -1382,13 +1382,11 @@ function deleteProject(idx) {
       <span id="chat-title">🤖 CayenaBot</span>
       <select id="chat-model-select">
         <option value="google/gemini-2.5-pro-exp-03-25:free">Gemini 2.5 Pro (Mejor)</option>
+        <option value="google/gemini-2.5-flash-preview-05-20:free">Gemini 2.5 Flash</option>
+        <option value="qwen/qwen3-235b-a22b:free">Qwen3 235B</option>
         <option value="deepseek/deepseek-chat-v3-0324:free">DeepSeek V3</option>
-        <option value="deepseek/deepseek-r1-zero:free">DeepSeek R1 Zero</option>
         <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B</option>
         <option value="mistralai/mistral-small-3.1-24b-instruct:free">Mistral Small 3.1</option>
-        <option value="nvidia/llama-3.1-nemotron-nano-8b-v1:free">Nemotron Nano 8B</option>
-        <option value="qwen/qwen2.5-vl-3b-instruct:free">Qwen 2.5 VL 3B</option>
-        <option value="moonshotai/kimi-vl-a3b-thinking:free">Kimi VL Thinking</option>
       </select>
     </div>
     <div id="project-toolbar">
@@ -3396,40 +3394,39 @@ async function sendChat() {
   const orKey = state.orKey;
   let model = document.getElementById('chat-model-select').value;
 
-  // Build provider list: try user's selected model first, then fallbacks
-  // Support multiple providers: OpenRouter (free), OpenAI, Claude, Groq
+  // Build provider list based on what user selected + fallbacks
   const chatProviders = [];
 
-  // Provider 1: User's selected model via OpenRouter
-  if (model.endsWith(':free') || !state.openaiKey && !state.claudeKey && !state.groqKey) {
-    if (!model.endsWith(':free')) model = 'google/gemini-2.5-pro-exp-03-25:free';
-  }
-
-  // Provider 2: Groq (fast, free tier generous)
-  if (state.groqKey) {
+  // If user selected a specific provider from dropdown
+  if (model === '__groq__' && state.groqKey) {
     chatProviders.push({ type: 'groq', model: 'llama-3.3-70b-versatile', key: state.groqKey });
-  }
-
-  // Provider 3: OpenAI
-  if (state.openaiKey) {
+  } else if (model === '__openai__' && state.openaiKey) {
     chatProviders.push({ type: 'openai', model: 'gpt-4o-mini', key: state.openaiKey });
-  }
-
-  // Provider 4: Claude
-  if (state.claudeKey) {
+  } else if (model === '__claude__' && state.claudeKey) {
     chatProviders.push({ type: 'claude', model: 'claude-sonnet-4-20250514', key: state.claudeKey });
   }
 
-  // OpenRouter free models (always available as fallback)
-  const discovered = state.freeModels || [];
-  const orModels = [model, ...discovered,
+  // Add paid providers as fallbacks if available
+  if (state.groqKey && model !== '__groq__') chatProviders.push({ type: 'groq', model: 'llama-3.3-70b-versatile', key: state.groqKey });
+  if (state.openaiKey && model !== '__openai__') chatProviders.push({ type: 'openai', model: 'gpt-4o-mini', key: state.openaiKey });
+  if (state.claudeKey && model !== '__claude__') chatProviders.push({ type: 'claude', model: 'claude-sonnet-4-20250514', key: state.claudeKey });
+
+  // SAFETY: OpenRouter ONLY free models — NEVER spend credits
+  // Force :free suffix on all OpenRouter models
+  const discovered = (state.freeModels || []).filter(m => m.endsWith(':free'));
+  let orSelected = model.startsWith('__') ? '' : model;
+  if (orSelected && !orSelected.endsWith(':free')) orSelected = ''; // reject non-free
+
+  const orModels = [orSelected,
     'google/gemini-2.5-pro-exp-03-25:free',
     'google/gemini-2.5-flash-preview-05-20:free',
+    'qwen/qwen3-235b-a22b:free',
     'deepseek/deepseek-chat-v3-0324:free',
     'meta-llama/llama-3.3-70b-instruct:free',
-    'qwen/qwen3-235b-a22b:free',
-    'mistralai/mistral-small-3.1-24b-instruct:free'
-  ].filter((v, i, a) => a.indexOf(v) === i);
+    'mistralai/mistral-small-3.1-24b-instruct:free',
+    ...discovered
+  ].filter((v, i, a) => v && a.indexOf(v) === i && v.endsWith(':free')); // DOUBLE CHECK :free
+
   orModels.forEach(m => chatProviders.push({ type: 'openrouter', model: m, key: state.orKey }));
 
   let reply = null;
