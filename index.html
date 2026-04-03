@@ -3097,7 +3097,22 @@ async function generateImage(prompt, opts = {}) {
                     const result = await resultResp.json();
                     const imgUrl = result.generations?.[0]?.img;
                     if (imgUrl) {
-                      console.log('AI Horde: ✅ image generated!');
+                      console.log('AI Horde: ✅ image generated! Converting to data URL...');
+                      // Convert R2 URL to base64 data URL (R2 URLs are temporary and blocked by Pannellum CORS)
+                      try {
+                        const imgResp = await fetch(imgUrl, { signal: AbortSignal.timeout(15000) });
+                        if (imgResp.ok) {
+                          const blob = await imgResp.blob();
+                          return await new Promise(resolve => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result);
+                            reader.onerror = () => resolve(imgUrl); // fallback to URL
+                            reader.readAsDataURL(blob);
+                          });
+                        }
+                      } catch(e) {
+                        console.log('AI Horde: could not convert to data URL, using raw URL');
+                      }
                       return imgUrl;
                     }
                   }
@@ -4422,7 +4437,18 @@ async function diagRenders() {
           if (!resultResp.ok) throw new Error(`Status HTTP ${resultResp.status}`);
           const result = await resultResp.json();
           const imgUrl = result.generations?.[0]?.img;
-          if (imgUrl) return { size: 0, url: imgUrl };
+          if (imgUrl) {
+            // Convert R2 URL to data URL for display
+            try {
+              const imgR = await fetch(imgUrl, { signal: AbortSignal.timeout(10000) });
+              if (imgR.ok) {
+                const blob = await imgR.blob();
+                const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+                return { size: blob.size, url: dataUrl };
+              }
+            } catch(e) {}
+            return { size: 0, url: imgUrl };
+          }
           throw new Error('No image in result: ' + JSON.stringify(result).slice(0, 200));
         }
         if (status.faulted) throw new Error('Job faulted');
