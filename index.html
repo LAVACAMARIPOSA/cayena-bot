@@ -965,15 +965,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="chat-header">
       <span id="chat-title">🤖 CayenaBot</span>
       <select id="chat-model-select">
-        <option value="meta-llama/llama-4-maverick:free">Llama 4 Maverick</option>
-        <option value="meta-llama/llama-4-scout:free">Llama 4 Scout</option>
-        <option value="google/gemini-2.0-flash-exp:free">Gemini 2.0 Flash</option>
+        <option value="google/gemini-2.5-pro-exp-03-25:free">Gemini 2.5 Pro (Mejor)</option>
         <option value="deepseek/deepseek-chat-v3-0324:free">DeepSeek V3</option>
-        <option value="qwen/qwen-2.5-72b-instruct:free">Qwen 2.5 72B</option>
-        <option value="mistralai/mistral-small-3.1-24b-instruct:free">Mistral Small 3.1</option>
-        <option value="google/gemma-3-27b-it:free">Gemma 3 27B</option>
+        <option value="deepseek/deepseek-r1-zero:free">DeepSeek R1 Zero</option>
         <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B</option>
-        <option value="nousresearch/deephermes-3-llama-3-8b-preview:free">DeepHermes 3</option>
+        <option value="mistralai/mistral-small-3.1-24b-instruct:free">Mistral Small 3.1</option>
+        <option value="nvidia/llama-3.1-nemotron-nano-8b-v1:free">Nemotron Nano 8B</option>
+        <option value="qwen/qwen2.5-vl-3b-instruct:free">Qwen 2.5 VL 3B</option>
+        <option value="moonshotai/kimi-vl-a3b-thinking:free">Kimi VL Thinking</option>
       </select>
     </div>
     <div id="project-toolbar">
@@ -1611,7 +1610,7 @@ const state = {
   chatHistory: [],
   orKey: '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',
   hfKey: '',
-  chatModel: 'meta-llama/llama-3.2-3b-instruct:free',
+  chatModel: 'google/gemini-2.5-pro-exp-03-25:free',
   renderResultData: null,
   lightboxIdx: 0,
   chatOpen: false,
@@ -2176,56 +2175,81 @@ async function sendChat() {
 
   // SAFETY: Force free models only — never spend credits
   if (!model.endsWith(':free')) {
-    model = 'meta-llama/llama-4-maverick:free';
+    model = 'google/gemini-2.5-pro-exp-03-25:free';
   }
 
-  try {
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${orKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin || 'https://cayenabot.ai',
-        'X-Title': 'CayenaBot'
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...state.chatHistory.slice(-12)
-        ],
-        max_tokens: 1500
-      })
-    });
+  // Fallback models to try if primary fails
+  const fallbackModels = [
+    model,
+    'google/gemini-2.5-pro-exp-03-25:free',
+    'deepseek/deepseek-chat-v3-0324:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'mistralai/mistral-small-3.1-24b-instruct:free',
+    'deepseek/deepseek-r1-zero:free',
+    'nvidia/llama-3.1-nemotron-nano-8b-v1:free'
+  ].filter((v, i, a) => a.indexOf(v) === i); // dedupe
 
-    removeEl(thinkEl);
+  let reply = null;
+  let lastError = '';
 
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      const errMsg = err?.error?.message || `Error ${resp.status}`;
-      if (resp.status === 401 || resp.status === 403 || errMsg.includes('not found') || errMsg.includes('invalid') || errMsg.includes('auth')) {
-        addMsg('assistant', `⚠️ <strong>Error de autenticación:</strong> ${errMsg}<br><br>Tu API key puede estar expirada. Ve a ⚙️ <strong>Configuración</strong> para actualizarla.<br><a href="https://openrouter.ai/settings/keys" target="_blank" style="color:var(--blue)">→ Obtener nueva key en OpenRouter</a>`);
+  for (const tryModel of fallbackModels) {
+    try {
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${orKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin || 'https://cayenabot.ai',
+          'X-Title': 'CayenaBot'
+        },
+        body: JSON.stringify({
+          model: tryModel,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            ...state.chatHistory.slice(-12)
+          ],
+          max_tokens: 1500
+        })
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        reply = data.choices?.[0]?.message?.content || null;
+        if (reply) break;
       } else {
-        addMsg('assistant', `⚠️ ${errMsg}`);
+        const err = await resp.json().catch(() => ({}));
+        lastError = err?.error?.message || `Error ${resp.status}`;
+        // Auth error = stop trying
+        if (resp.status === 401 || resp.status === 403) {
+          removeEl(thinkEl);
+          addMsg('assistant', `⚠️ <strong>Error de autenticación:</strong> ${lastError}<br><br>Ve a ⚙️ <strong>Configuración</strong> para actualizar tu API key.<br><a href="https://openrouter.ai/settings/keys" target="_blank" style="color:var(--blue)">→ Obtener nueva key en OpenRouter</a>`);
+          return;
+        }
+        // "No endpoints" = try next model
+        continue;
       }
-      return;
+    } catch(e) {
+      lastError = e.message;
+      continue;
     }
+  }
 
-    const data = await resp.json();
-    const reply = data.choices?.[0]?.message?.content || '(sin respuesta)';
-    state.chatHistory.push({ role: 'assistant', content: reply });
+  removeEl(thinkEl);
 
-    // Check for render tags in AI response
-    const renderTags = extractRenderTags(reply);
-    const cleanReply = stripRenderTags(reply);
-    if (cleanReply) addMsg('assistant', cleanReply);
-    if (renderTags.length > 0) {
-      renderTags.forEach(p => renderQueue.push({ prompt: p, label: p.split(',')[0].slice(0, 50) }));
-      processRenderQueue();
-    }
-  } catch(e) {
-    removeEl(thinkEl);
-    addMsg('assistant', `⚠️ Error de conexión: ${e.message}`);
+  if (!reply) {
+    addMsg('assistant', `⚠️ Ningún modelo respondió. Último error: ${lastError}<br>Intenta de nuevo o cambia el modelo en el dropdown.`);
+    return;
+  }
+
+  state.chatHistory.push({ role: 'assistant', content: reply });
+
+  // Check for render tags in AI response
+  const renderTags = extractRenderTags(reply);
+  const cleanReply = stripRenderTags(reply);
+  if (cleanReply) addMsg('assistant', cleanReply);
+  if (renderTags.length > 0) {
+    renderTags.forEach(p => renderQueue.push({ prompt: p, label: p.split(',')[0].slice(0, 50) }));
+    processRenderQueue();
   }
 }
 
