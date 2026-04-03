@@ -2457,8 +2457,7 @@ async function generateImage(prompt, opts = {}) {
               role: 'user',
               content: `Generate a photorealistic architectural render image. Only output the image, no text. Image: ${prompt}`
             }],
-            provider: { require_parameters: true },
-            response_format: { type: 'image' }
+            modalities: ['text', 'image']
           })
         });
 
@@ -3370,8 +3369,7 @@ async function diagRenders() {
             body: JSON.stringify({
               model,
               messages: [{ role: 'user', content: 'Generate a photorealistic image of: ' + testPrompt + '. Only output the image.' }],
-              provider: { require_parameters: true },
-              response_format: { type: 'image' }
+              modalities: ['text', 'image']
             })
           });
           if (!resp.ok) { console.log(model, resp.status); continue; }
