@@ -1366,10 +1366,234 @@ async function generateSpaceVariants(spaceType, geo, projectName, customDetails)
   const space = SPACE_TEMPLATES[spaceType] || SPACE_TEMPLATES['living'];
 
   for (let i = 0; i < space.variants.length; i++) {
-    const built = buildRenderPrompt(spaceType, geo, i, projectName, customDetails);
+    const built = buildEnhancedPrompt(spaceType, geo, i, projectName, customDetails);
     variants.push(built);
   }
   return variants;
+}
+
+// =============================================
+// 3D ASSET CATALOG — Furniture, Decor & Architecture
+// =============================================
+const ASSET_CATALOG = {
+  furniture: {
+    sofas: [
+      { name: 'B&B Italia Charles sectional sofa', style: 'modern', material: 'premium Italian leather, chrome legs', color: 'cognac brown' },
+      { name: 'Restoration Hardware Cloud modular sofa', style: 'contemporary', material: 'Belgian linen', color: 'dove white' },
+      { name: 'Minotti Hamilton sofa', style: 'luxury', material: 'saddle leather', color: 'dark chocolate' },
+      { name: 'Roche Bobois Mah Jong modular', style: 'eclectic', material: 'Missoni fabric', color: 'multicolor earth tones' },
+      { name: 'Poliform Bristol sofa', style: 'minimalist', material: 'bouclé fabric', color: 'cream' },
+      { name: 'Dedon outdoor rattan sectional', style: 'tropical', material: 'hand-woven synthetic rattan', color: 'natural with white cushions' },
+      { name: 'Kettal Bitta outdoor sofa', style: 'resort', material: 'aluminum frame, braided cord', color: 'sage green' }
+    ],
+    tables: [
+      { name: 'Knoll Saarinen tulip dining table', style: 'modern', material: 'Carrara marble top, white pedestal', seats: 6 },
+      { name: 'Poliform Concorde table', style: 'luxury', material: 'Emperador dark marble, bronze base', seats: 8 },
+      { name: 'live-edge walnut slab table', style: 'organic', material: 'solid black walnut, resin river, steel legs', seats: 10 },
+      { name: 'Kettal Village outdoor dining table', style: 'resort', material: 'teak and aluminum', seats: 8 },
+      { name: 'Cassina LC6 table by Le Corbusier', style: 'iconic', material: 'crystal top, steel frame', seats: 6 }
+    ],
+    chairs: [
+      { name: 'Eames lounge chair and ottoman', style: 'iconic', material: 'molded plywood, premium leather', color: 'black' },
+      { name: 'Hans Wegner CH07 Shell chair', style: 'scandinavian', material: 'laminated oak', color: 'natural' },
+      { name: 'Acapulco woven chair', style: 'tropical', material: 'PVC cord on powder-coated steel', color: 'turquoise' },
+      { name: 'Tom Dixon Wingback chair', style: 'contemporary', material: 'copper-coated legs, wool', color: 'charcoal' },
+      { name: 'Patricia Urquiola Tropicalia chair', style: 'resort', material: 'stainless steel, polymer thread', color: 'multicolor' }
+    ],
+    beds: [
+      { name: 'Hästens Vividus bed', style: 'luxury', material: 'natural materials, blue check fabric', size: 'king' },
+      { name: 'Poliform Onda bed', style: 'modern', material: 'padded leather headboard', size: 'king' },
+      { name: 'four-poster canopy bed', style: 'tropical', material: 'solid teak, white linen drapes', size: 'king' },
+      { name: 'RH Cloud platform bed', style: 'contemporary', material: 'upholstered Belgian linen', size: 'king' }
+    ],
+    lighting: [
+      { name: 'Flos IC pendant lights cluster', style: 'modern', material: 'brushed brass, opal glass spheres' },
+      { name: 'Artemide Tolomeo floor lamp', style: 'iconic', material: 'polished aluminum' },
+      { name: 'Tom Dixon Melt pendant', style: 'luxury', material: 'blown metallic glass', color: 'gold' },
+      { name: 'handwoven rattan pendant lamp', style: 'tropical', material: 'natural rattan, linen cord' },
+      { name: 'Vibia Wireflow chandelier', style: 'minimalist', material: 'LED, coated steel wire' },
+      { name: 'recessed LED strip lighting', style: 'architectural', material: 'aluminum channel, warm white 3000K' }
+    ],
+    outdoor: [
+      { name: 'Dedon Swingrest hanging lounger', style: 'resort', material: 'fiber weave on steel frame' },
+      { name: 'Paola Lenti Float daybed', style: 'luxury', material: 'marine-grade fabric, teak frame' },
+      { name: 'Gandia Blasco Flat sun lounger', style: 'modern', material: 'powder-coated aluminum, Sunbrella fabric' },
+      { name: 'Tribu Vis À Vis lounger', style: 'premium', material: 'teak, Batyline fabric' }
+    ]
+  },
+  decor: {
+    art: ['large-scale abstract oil painting in earth tones', 'framed black & white architectural photography series', 'sculptural wall installation in hammered bronze', 'oversized ceramic vase collection', 'hand-carved wooden totem sculpture', 'contemporary metal wall art panels'],
+    textiles: ['hand-knotted Moroccan Beni Ourain rug', 'Turkish kilim rug with geometric patterns', 'sisal natural fiber area rug', 'cowhide rug in natural brown/white', 'Persian Tabriz silk rug', 'custom-dyed indigo linen curtains floor-to-ceiling'],
+    accessories: ['Tom Dixon Eclectic collection candles', 'Aesop toiletries display', 'curated coffee table books stack (Assouline)', 'artisan ceramic bowl collection', 'blown glass sculptures', 'designer chess set on marble surface']
+  },
+  kitchen: {
+    appliances: ['Sub-Zero integrated refrigerator', 'Wolf 48-inch dual fuel range', 'Miele built-in coffee system', 'Gaggenau steam oven', 'Dornbracht Tara kitchen faucet in brushed platinum'],
+    details: ['waterfall edge island countertop', 'open shelving with artisan ceramics', 'integrated LED under-cabinet lighting', 'custom walnut floating shelves', 'handmade zellige tile backsplash']
+  },
+  bathroom: {
+    fixtures: ['Agape Drop freestanding bathtub', 'Hansgrohe Raindance rainfall showerhead', 'Duravit wall-hung toilet', 'Gessi 316 freestanding tub filler in copper PVD', 'Victoria + Albert Napoli tub'],
+    details: ['backlit onyx feature wall', 'heated marble floors', 'frameless glass shower enclosure floor-to-ceiling', 'floating double vanity in walnut with vessel sinks', 'rain shower with body jets panel']
+  },
+  pool: {
+    elements: ['infinity edge pool with glass mosaic tiles', 'Baja shelf with submerged sun loungers', 'integrated pool bar with underwater stools', 'fire bowls on pool corners', 'LED color-changing underwater lighting', 'natural stone waterfall feature', 'heated jacuzzi with panoramic view']
+  },
+  glbAssets: {
+    source: 'https://opensource3dassets.com',
+    apiBase: 'https://raw.githubusercontent.com/ToxSam/open-source-3D-assets/main',
+    collections: ['MomusPark', 'Medieval_Fair', 'TombChaser', 'ChromaticChaos', 'CrystalCrossroads'],
+    loader: 'GLTFLoader'
+  }
+};
+
+// Pick random items from asset catalog for prompts
+function pickAssets(category, count) {
+  const items = Array.isArray(category) ? category : [];
+  const shuffled = [...items].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+function pickFurnitureForSpace(spaceType) {
+  const c = ASSET_CATALOG;
+  switch(spaceType) {
+    case 'living':
+      return [
+        c.furniture.sofas[Math.floor(Math.random() * c.furniture.sofas.length)],
+        c.furniture.tables[Math.floor(Math.random() * c.furniture.tables.length)],
+        c.furniture.chairs[Math.floor(Math.random() * c.furniture.chairs.length)],
+        c.furniture.lighting[Math.floor(Math.random() * c.furniture.lighting.length)],
+      ].map(i => `${i.name} (${i.material})`);
+    case 'cocina':
+      return [...pickAssets(c.kitchen.appliances, 3), ...pickAssets(c.kitchen.details, 2)];
+    case 'recamara':
+      return [
+        c.furniture.beds[Math.floor(Math.random() * c.furniture.beds.length)],
+        c.furniture.lighting[Math.floor(Math.random() * c.furniture.lighting.length)],
+      ].map(i => `${i.name} (${i.material})`).concat(pickAssets(c.decor.textiles, 1));
+    case 'baño':
+      return [...pickAssets(c.bathroom.fixtures, 3), ...pickAssets(c.bathroom.details, 2)];
+    case 'piscina':
+      return pickAssets(c.pool.elements, 4);
+    case 'terraza':
+      return c.furniture.outdoor.slice(0, 3).map(i => `${i.name} (${i.material})`);
+    default:
+      return [pickAssets(c.decor.art, 1)[0], pickAssets(c.decor.accessories, 2)].flat();
+  }
+}
+
+// =============================================
+// ENHANCED RENDER PROMPT BUILDER (v2 — with asset catalog)
+// =============================================
+function buildEnhancedPrompt(spaceType, geo, variantIdx, projectName, customDetails) {
+  const space = SPACE_TEMPLATES[spaceType] || SPACE_TEMPLATES['living'];
+  const variant = space.variants[variantIdx % space.variants.length];
+  const archStyle = geo.architecture[Math.floor(Math.random() * geo.architecture.length)];
+
+  // Materials from geo
+  const floor = geo.materials.floors[Math.floor(Math.random() * geo.materials.floors.length)];
+  const wall = geo.materials.walls[Math.floor(Math.random() * geo.materials.walls.length)];
+  const counter = geo.materials.countertops[Math.floor(Math.random() * geo.materials.countertops.length)];
+  const finish = geo.materials.finishes[Math.floor(Math.random() * geo.materials.finishes.length)];
+
+  // Specific furniture and decor from asset catalog
+  const assets = pickFurnitureForSpace(spaceType);
+  const decor = pickAssets(ASSET_CATALOG.decor.art, 1).concat(pickAssets(ASSET_CATALOG.decor.accessories, 1));
+
+  // Vegetation from geo
+  const vegs = [...geo.vegetation].sort(() => Math.random() - 0.5).slice(0, 3);
+
+  // Lighting from geo
+  const light = geo.lighting[Math.floor(Math.random() * geo.lighting.length)];
+
+  const prompt = [
+    `Hyper-photorealistic architectural interior render of ${space.label}`,
+    projectName ? `luxury project "${projectName}"` : 'high-end luxury residence',
+    `${archStyle} style, ${variant} atmosphere`,
+    // Specific materials
+    `Flooring: ${floor}`,
+    `Walls: ${wall}`,
+    `Surfaces: ${counter}`,
+    `Hardware: ${finish}`,
+    // Specific branded furniture
+    `Furniture and fixtures: ${assets.join(', ')}`,
+    // Decor
+    `Decor: ${decor.join(', ')}`,
+    // Space elements
+    space.elements.slice(0, 4).join(', '),
+    // Vegetation
+    `Plants: ${vegs.join(', ')}`,
+    // Lighting
+    `Lighting: ${light}`,
+    // Custom
+    customDetails || '',
+    // Technical quality
+    'Award-winning Architectural Digest cover photo quality',
+    'Shot on Phase One IQ4 150MP, Schneider 28mm lens',
+    'Professional architectural photography, ray tracing, global illumination',
+    '8K resolution, ultra-realistic, volumetric light, depth of field bokeh'
+  ].filter(Boolean).join('. ');
+
+  return {
+    prompt,
+    materials: { floor, wall, counter, finish },
+    furniture: assets,
+    decor,
+    variant,
+    space: space.label,
+    priceEstimate: getMaterialPriceEstimate(geo, 100)
+  };
+}
+
+// =============================================
+// THREE.JS GLB/GLTF MODEL LOADER
+// =============================================
+let __gltfLoader = null;
+
+function initGLTFLoader() {
+  if (__gltfLoader) return __gltfLoader;
+  if (typeof THREE === 'undefined') return null;
+
+  // Load GLTFLoader from Three.js examples
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+  document.head.appendChild(script);
+
+  script.onload = () => {
+    if (THREE.GLTFLoader) {
+      __gltfLoader = new THREE.GLTFLoader();
+      console.log('GLTFLoader ready');
+    }
+  };
+  return null;
+}
+
+function loadGLBModel(url, position, scale, scene) {
+  if (!__gltfLoader) { initGLTFLoader(); return; }
+  __gltfLoader.load(url,
+    (gltf) => {
+      const model = gltf.scene;
+      model.position.set(position.x || 0, position.y || 0, position.z || 0);
+      model.scale.set(scale || 1, scale || 1, scale || 1);
+      model.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      (scene || __tourScene).add(model);
+    },
+    undefined,
+    (err) => console.warn('GLB load error:', err)
+  );
+}
+
+// Asset browser state
+const assetBrowserState = { loaded: [], favorites: [] };
+
+function addGLBToTour(url, label, position) {
+  if (!__tourScene) { showToast('⚠️ Abre el Tour primero'); return; }
+  loadGLBModel(url, position || { x: 0, y: -100, z: 0 }, 50, __tourScene);
+  assetBrowserState.loaded.push({ url, label, position });
+  showToast('✅ Modelo 3D agregado al tour: ' + label);
 }
 
 // =============================================
@@ -1434,6 +1658,20 @@ FLUJO DE TRABAJO:
 3. Genera renders con materiales específicos reales y precios
 4. Ofrece 3 variantes por espacio
 5. El usuario elige, ajusta, y el contenido se agrega al tour virtual
+
+MOBILIARIO DE DISEÑADOR (usa nombres reales en los renders):
+Sofás: B&B Italia Charles, Minotti Hamilton, Roche Bobois Mah Jong, Poliform Bristol, Dedon rattan
+Mesas: Knoll Saarinen tulip, Poliform Concorde, mesa live-edge de walnut
+Sillas: Eames lounge chair, Hans Wegner Shell, Acapulco chair, Tom Dixon Wingback
+Iluminación: Flos IC pendant, Artemide Tolomeo, Tom Dixon Melt, Vibia Wireflow
+Cocina: Sub-Zero, Wolf range, Miele, Gaggenau, Dornbracht faucets
+Baño: Agape Drop tub, Hansgrohe Raindance, Gessi 316, Victoria+Albert Napoli
+Outdoor: Dedon Swingrest, Paola Lenti Float, Gandia Blasco, Tribu lounger
+Piscina: infinity edge, Baja shelf, fire bowls, LED underwater, natural stone waterfall
+
+ARCHIVO UPLOAD: El usuario puede subir imágenes, ZIP, PDF, planos DWG/DXF, modelos 3D (FBX/OBJ/GLTF/GLB/STL). Analiza cada archivo y genera contenido apropiado.
+
+GUARDAR/EXPORTAR: El usuario puede guardar su proyecto, exportarlo como JSON, e importarlo después. Usa los botones de la toolbar.
 
 Responde profesional, conciso y proactivo. Si no tiene info del proyecto, pregunta nombre, ubicación y tipo de unidades.`;
 
@@ -1922,8 +2160,8 @@ async function sendChat() {
     for (const [key, val] of Object.entries(spaceMap)) {
       if (desc.includes(key)) { spaceType = val; break; }
     }
-    const built = buildRenderPrompt(spaceType, geo, 0, projectInfo.name, desc);
-    addMsg('assistant', `🎨 Generando <strong>${built.space}</strong> con materiales de la zona ${geo.label}:<br>• Piso: ${built.materials.floor}<br>• Paredes: ${built.materials.wall}<br>• Acabados: ${built.materials.finish}<br>• Estilo: ${built.variant}`);
+    const built = buildEnhancedPrompt(spaceType, geo, 0, projectInfo.name, desc);
+    addMsg('assistant', `🎨 Generando <strong>${built.space}</strong> — zona ${geo.label}:<br>• Piso: ${built.materials.floor}<br>• Paredes: ${built.materials.wall}<br>• Acabados: ${built.materials.finish}<br>• Mobiliario: ${built.furniture.slice(0,2).join(', ')}<br>• Estilo: ${built.variant}`);
     renderQueue.push({ prompt: built.prompt, label: built.space });
     processRenderQueue();
     return;
@@ -2813,12 +3051,12 @@ function handleFileUpload(files) {
     } else if (ext === 'pdf') {
       addMsg('assistant', '📄 <strong>' + file.name + '</strong> recibido. Generando render de: "' + name + '"');
       const geo = detectGeoContext(state.projectLocation);
-      const built = buildRenderPrompt('fachada', geo, 0, state.projectName, name);
+      const built = buildEnhancedPrompt('fachada', geo, 0, state.projectName, name);
       renderQueue.push({ prompt: built.prompt, label: name }); processRenderQueue();
     } else if (['dwg','dxf','skp','fbx','obj','gltf','glb','3ds','stl','rvt'].includes(ext)) {
       addMsg('assistant', '📁 <strong>' + file.name + '</strong> (' + ext.toUpperCase() + ') recibido. Generando render hiperrealista del espacio...');
       const geo = detectGeoContext(state.projectLocation);
-      const built = buildRenderPrompt('living', geo, 0, state.projectName, name);
+      const built = buildEnhancedPrompt('living', geo, 0, state.projectName, name);
       renderQueue.push({ prompt: built.prompt, label: name }); processRenderQueue();
     } else {
       addMsg('assistant', '📎 <strong>' + file.name + '</strong> recibido (formato ' + ext.toUpperCase() + ').');
@@ -2898,6 +3136,9 @@ function init() {
   document.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; document.getElementById('file-drop-overlay').classList.remove('show'); } });
   document.addEventListener('dragover', (e) => e.preventDefault());
   document.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; document.getElementById('file-drop-overlay').classList.remove('show'); if (e.dataTransfer.files.length) handleFileUpload(e.dataTransfer.files); });
+
+  // Init GLTF loader for 3D assets
+  if (typeof THREE !== 'undefined') initGLTFLoader();
 
   showToast('🏗️ CayenaBot listo — cuéntame sobre tu proyecto');
   // Try load saved project
