@@ -7330,24 +7330,7 @@ function saveProject() {
   catch(e) { exportProject(); }
 }
 
-function loadProject() {
-  try {
-    const saved = localStorage.getItem('cayenabot_project');
-    if (!saved) return false;
-    const p = JSON.parse(saved);
-    if (p.images) Object.assign(IMG, p.images);
-    if (p.scenes) Object.assign(SCENES, p.scenes);
-    if (p.units && p.units.length) UNITS.push(...p.units);
-    if (p.floorPlans) Object.assign(FLOOR_PLANS, p.floorPlans);
-    if (p.chatHistory) state.chatHistory = p.chatHistory;
-    if (p.name) state.projectName = p.name;
-    if (p.location) state.projectLocation = p.location;
-    if (p.currentScene && SCENES[p.currentScene]) state.currentScene = p.currentScene;
-    buildGallery(); buildUnits(); updateMinimap(); buildFloorPlans();
-    if (Object.keys(IMG).length > 0) showToast('📂 Proyecto cargado: ' + (p.name || 'Sin nombre'));
-    return true;
-  } catch(e) { return false; }
-}
+// Legacy loadProject removed — replaced by loadProject(idx) in project selector
 
 // =============================================
 // AUTO-SAVE SYSTEM (like ChatGPT conversations)
