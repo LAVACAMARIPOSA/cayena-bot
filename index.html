@@ -2417,10 +2417,17 @@ function removeEl(el) {
 
 // =============================================
 // CENTRALIZED IMAGE GENERATION
-// CORS proxy for Pollinations (bypasses network blocks)
+// OpenRouter FREE models (same API key as chat!)
 // =============================================
 let __imgGenActive = 0;
 const __IMG_MAX_CONCURRENT = 3;
+
+// OpenRouter models that support image generation (free, :free suffix)
+const __OR_IMAGE_MODELS = [
+  'google/gemini-2.5-flash-preview-05-20:free',
+  'google/gemini-2.0-flash-exp:free',
+  'google/gemini-2.5-pro-exp-03-25:free'
+];
 
 async function generateImage(prompt, opts = {}) {
   const fast = opts.fast || false;
@@ -2432,41 +2439,82 @@ async function generateImage(prompt, opts = {}) {
   __imgGenActive++;
 
   try {
-    // Build Pollinations URL
-    const seed = Date.now() + Math.floor(Math.random() * 10000);
-    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&model=flux&nologo=true&seed=${seed}`;
-
-    // === METHOD 1: Pollinations via CORS proxies (free, bypasses blocks) ===
-    const proxies = [
-      (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-      (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-      (url) => url  // direct (may work in some environments)
-    ];
-
-    for (let i = 0; i < proxies.length; i++) {
+    // === PRIMARY: OpenRouter image generation (FREE, same key as chat!) ===
+    for (const model of __OR_IMAGE_MODELS) {
       try {
-        const proxiedUrl = proxies[i](pollUrl);
-        const r = await fetch(proxiedUrl, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
-        if (r.status === 429) {
-          // Rate limited — wait and retry with next proxy
-          await new Promise(r => setTimeout(r, 2000));
+        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          signal: AbortSignal.timeout(fast ? 30000 : 60000),
+          headers: {
+            'Authorization': `Bearer ${state.orKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': location.href,
+            'X-Title': 'CayenaBot'
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{
+              role: 'user',
+              content: `Generate a photorealistic architectural render image. Only output the image, no text. Image: ${prompt}`
+            }],
+            provider: { require_parameters: true },
+            response_format: { type: 'image' }
+          })
+        });
+
+        if (!resp.ok) {
+          console.log(`OR image ${model}: HTTP ${resp.status}`);
           continue;
         }
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const blob = await r.blob();
-        if (blob.size < 1000 || !blob.type.startsWith('image')) throw new Error('Not image (' + blob.size + 'b ' + blob.type + ')');
-        return URL.createObjectURL(blob);
+
+        const d = await resp.json();
+        const msg = d.choices?.[0]?.message;
+
+        // Check for inline image data in content array
+        if (Array.isArray(msg?.content)) {
+          for (const part of msg.content) {
+            if (part.type === 'image_url' && part.image_url?.url) return part.image_url.url;
+            if (part.type === 'image' && part.url) return part.url;
+            if (part.inline_data?.data) return `data:${part.inline_data.mime_type || 'image/png'};base64,${part.inline_data.data}`;
+            // base64 image in content
+            if (typeof part === 'string' && part.startsWith('data:image')) return part;
+          }
+        }
+
+        // Check for base64 in direct content string
+        if (typeof msg?.content === 'string') {
+          const b64Match = msg.content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+          if (b64Match) return b64Match[0];
+        }
+
+        console.log(`OR image ${model}: no image in response`);
       } catch(e) {
-        console.log(`Proxy ${i} failed:`, e.message);
+        console.log(`OR image ${model}:`, e.message);
       }
     }
 
-    // === METHOD 2: Together.ai (if key available) ===
+    // === FALLBACK: CORS proxy → Pollinations ===
+    const seed = Date.now() + Math.floor(Math.random() * 10000);
+    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&model=flux&nologo=true&seed=${seed}`;
+    const proxies = [
+      `https://corsproxy.io/?url=${encodeURIComponent(pollUrl)}`,
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(pollUrl)}`
+    ];
+    for (const pUrl of proxies) {
+      try {
+        const r = await fetch(pUrl, { signal: AbortSignal.timeout(fast ? 25000 : 50000) });
+        if (!r.ok) continue;
+        const blob = await r.blob();
+        if (blob.size > 1000 && blob.type.startsWith('image')) return URL.createObjectURL(blob);
+      } catch(e) { /* next proxy */ }
+    }
+
+    // === FALLBACK: Together.ai ===
     const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
     if (togetherKey) {
       try {
         const r = await fetch('https://api.together.xyz/v1/images/generations', {
-          method: 'POST', signal: AbortSignal.timeout(fast ? 25000 : 45000),
+          method: 'POST', signal: AbortSignal.timeout(30000),
           headers: { 'Authorization': `Bearer ${togetherKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell-Free', prompt, width: 1024, height: 768, steps: 4, n: 1, response_format: 'b64_json' })
         });
@@ -2475,29 +2523,8 @@ async function generateImage(prompt, opts = {}) {
           const b64 = d.data?.[0]?.b64_json;
           if (b64) return `data:image/png;base64,${b64}`;
         }
-      } catch(e) { console.log('Together.ai:', e.message); }
+      } catch(e) { /* skip */ }
     }
-
-    // === METHOD 3: Pollinations via <img> tag (last resort) ===
-    try {
-      const result = await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        const tmout = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, fast ? 25000 : 50000);
-        img.onload = () => {
-          clearTimeout(tmout);
-          try {
-            const c = document.createElement('canvas');
-            c.width = img.naturalWidth; c.height = img.naturalHeight;
-            c.getContext('2d').drawImage(img, 0, 0);
-            resolve(c.toDataURL('image/jpeg', 0.85));
-          } catch(e) { resolve(pollUrl); }
-        };
-        img.onerror = () => { clearTimeout(tmout); reject(new Error('blocked')); };
-        img.src = pollUrl;
-      });
-      if (result) return result;
-    } catch(e) { console.log('Pollinations img:', e.message); }
 
     return null;
   } finally {
@@ -3332,26 +3359,40 @@ async function diagRenders() {
       if (!b64) throw new Error('No image data in response');
       return { size: b64.length, url: `data:image/png;base64,${b64}` };
     }},
-    { name: 'OpenRouter Gemini (imagen)', fn: async (row) => {
-      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST', signal: AbortSignal.timeout(60000),
-        headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href },
-        body: JSON.stringify({
-          model: 'google/gemini-2.0-flash-exp:free',
-          messages: [{ role: 'user', content: 'Generate an image of: ' + testPrompt }],
-          modalities: ['text', 'image']
-        })
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const d = await resp.json();
-      const parts = d.choices?.[0]?.message?.content;
-      if (typeof parts === 'string') throw new Error('Solo texto, no imagen');
-      if (Array.isArray(parts)) {
-        const ip = parts.find(p => p.type === 'image_url' || p.inline_data);
-        if (ip?.image_url?.url) return { size: 0, url: ip.image_url.url };
-        if (ip?.inline_data?.data) return { size: ip.inline_data.data.length, url: `data:${ip.inline_data.mime_type||'image/png'};base64,${ip.inline_data.data}` };
+    { name: 'OpenRouter Gemini 2.5 Flash (imagen)', fn: async (row) => {
+      const models = ['google/gemini-2.5-flash-preview-05-20:free', 'google/gemini-2.0-flash-exp:free'];
+      for (const model of models) {
+        row.innerHTML = `<span>⏳</span> <strong>Probando ${model.split('/')[1]}</strong>...`;
+        try {
+          const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST', signal: AbortSignal.timeout(60000),
+            headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: 'user', content: 'Generate a photorealistic image of: ' + testPrompt + '. Only output the image.' }],
+              provider: { require_parameters: true },
+              response_format: { type: 'image' }
+            })
+          });
+          if (!resp.ok) { console.log(model, resp.status); continue; }
+          const d = await resp.json();
+          const msg = d.choices?.[0]?.message;
+          // Check array content
+          if (Array.isArray(msg?.content)) {
+            for (const part of msg.content) {
+              if (part.type === 'image_url' && part.image_url?.url) return { size: 0, url: part.image_url.url };
+              if (part.inline_data?.data) return { size: part.inline_data.data.length, url: `data:${part.inline_data.mime_type||'image/png'};base64,${part.inline_data.data}` };
+            }
+          }
+          // Check string content for base64
+          if (typeof msg?.content === 'string') {
+            const m = msg.content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+            if (m) return { size: m[0].length, url: m[0] };
+          }
+          console.log(model, 'response:', JSON.stringify(msg?.content).slice(0,200));
+        } catch(e) { console.log(model, e.message); }
       }
-      throw new Error('Respuesta sin imagen: ' + JSON.stringify(parts).slice(0, 150));
+      throw new Error('Ningún modelo Gemini generó imagen. Verifica la consola (F12) para detalles.');
     }}
   ];
 
