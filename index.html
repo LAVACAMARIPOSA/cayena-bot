@@ -916,7 +916,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div id="login-screen" style="position:fixed;inset:0;z-index:99999;background:#0b0d14;display:flex;align-items:center;justify-content:center">
   <div style="text-align:center;max-width:400px;width:92%">
     <div style="margin-bottom:32px">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#c4773b" stroke-width="1.5" style="margin-bottom:12px"><path d="M3 21h18M3 7v1a3 3 0 006 0V7m0 0V4l6 3v3m0 0v1a3 3 0 006 0V10m0-3V4"/><path d="M6 21v-4m4 4v-6m4 6v-4m4 4v-8"/></svg>
+      <svg width="52" height="52" viewBox="0 0 100 100" fill="none" style="margin-bottom:12px"><path d="M50 15 C55 5, 65 0, 70 10 C75 20, 60 30, 50 35 C40 30, 25 20, 30 10 C35 0, 45 5, 50 15Z" fill="#dc2626" opacity="0.9"/><path d="M50 35 C60 30, 75 25, 80 35 C85 45, 70 50, 60 48 C65 55, 70 70, 60 72 C50 74, 50 60, 50 50 C50 60, 50 74, 40 72 C30 70, 35 55, 40 48 C30 50, 15 45, 20 35 C25 25, 40 30, 50 35Z" fill="#dc2626" opacity="0.85"/><circle cx="50" cy="42" r="6" fill="#fbbf24"/></svg>
       <h1 style="color:#fff;font-size:26px;font-weight:700;margin:0;letter-spacing:-0.03em">CayenaBuilder</h1>
       <p style="color:rgba(255,255,255,0.35);font-size:12px;letter-spacing:0.12em;text-transform:uppercase;margin:6px 0 0">AI PropTech Platform</p>
     </div>
@@ -1067,26 +1067,23 @@ function refreshProjectList() {
     </div>`;
   }).join('');
 
-  // Single event listener on the list container for delegation
-  list.onclick = function(e) {
-    // Delete button
-    const delBtn = e.target.closest('.proj-delete-btn');
-    if (delBtn) {
-      e.stopPropagation();
-      const idx = parseInt(delBtn.dataset.idx);
-      if (!isNaN(idx)) deleteProject(idx);
-      return;
-    }
-    // Project card click
-    const card = e.target.closest('.project-card');
-    if (card) {
-      const idx = parseInt(card.dataset.idx);
-      if (!isNaN(idx)) {
-        console.log('Loading project index:', idx);
-        loadProject(idx);
-      }
-    }
-  };
+  // Attach click handlers directly to each card element
+  setTimeout(() => {
+    document.querySelectorAll('#project-list .project-card').forEach(card => {
+      card.onclick = function(e) {
+        if (e.target.tagName === 'BUTTON' || e.target.closest('.proj-delete-btn')) return;
+        const idx = parseInt(this.dataset.idx);
+        if (!isNaN(idx)) loadProject(idx);
+      };
+    });
+    document.querySelectorAll('#project-list .proj-delete-btn').forEach(btn => {
+      btn.onclick = function(e) {
+        e.stopPropagation();
+        const idx = parseInt(this.dataset.idx);
+        if (!isNaN(idx)) deleteProject(idx);
+      };
+    });
+  }, 50);
 }
 
 function getAllSavedProjects() {
@@ -1213,7 +1210,7 @@ function deleteProject(idx) {
 <!-- HEADER -->
 <header id="header">
   <div id="logo">
-    <div id="logo-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c4773b" stroke-width="2"><path d="M3 21h18M3 7v1a3 3 0 006 0V7m0 0V4l6 3v3m0 0v1a3 3 0 006 0V10m0-3V4"/></svg></div>
+    <div id="logo-icon"><svg width="22" height="22" viewBox="0 0 100 100" fill="none"><path d="M50 15 C55 5, 65 0, 70 10 C75 20, 60 30, 50 35 C40 30, 25 20, 30 10 C35 0, 45 5, 50 15Z" fill="#dc2626" opacity="0.9"/><path d="M50 35 C60 30, 75 25, 80 35 C85 45, 70 50, 60 48 C65 55, 70 70, 60 72 C50 74, 50 60, 50 50 C50 60, 50 74, 40 72 C30 70, 35 55, 40 48 C30 50, 15 45, 20 35 C25 25, 40 30, 50 35Z" fill="#dc2626" opacity="0.85"/><circle cx="50" cy="42" r="5" fill="#fbbf24"/></svg></div>
     <div>
       <span id="logo-text">CayenaBuilder</span>
       <span id="logo-sub">AI PropTech</span>
@@ -1733,11 +1730,22 @@ function deleteProject(idx) {
 <!-- TUTORIAL / ONBOARDING -->
 <div id="tutorial-overlay" style="display:none;position:fixed;inset:0;z-index:50000;background:rgba(0,0,0,0.92);overflow-y:auto;backdrop-filter:blur(10px)">
   <div style="max-width:700px;margin:20px auto;padding:20px">
-    <div style="text-align:center;margin-bottom:28px">
-      <div style="font-size:64px;margin-bottom:8px">🏗️</div>
-      <h1 style="color:#fff;font-size:28px;margin:0">Bienvenido a CayenaBot</h1>
-      <p style="color:var(--gold);font-size:14px;margin:6px 0 0">AI PropTech Builder — Tu asistente de real estate con IA</p>
+    <div style="text-align:center;margin-bottom:24px">
+      <svg width="44" height="44" viewBox="0 0 100 100" fill="none" style="margin-bottom:8px"><path d="M50 15 C55 5, 65 0, 70 10 C75 20, 60 30, 50 35 C40 30, 25 20, 30 10 C35 0, 45 5, 50 15Z" fill="#dc2626" opacity="0.9"/><path d="M50 35 C60 30, 75 25, 80 35 C85 45, 70 50, 60 48 C65 55, 70 70, 60 72 C50 74, 50 60, 50 50 C50 60, 50 74, 40 72 C30 70, 35 55, 40 48 C30 50, 15 45, 20 35 C25 25, 40 30, 50 35Z" fill="#dc2626" opacity="0.85"/><circle cx="50" cy="42" r="5" fill="#fbbf24"/></svg>
+      <h1 style="color:#fff;font-size:24px;margin:0;font-weight:700">CayenaBuilder</h1>
+      <p style="color:rgba(255,255,255,0.4);font-size:12px;margin:6px 0 0;letter-spacing:0.1em;text-transform:uppercase">Guia rapida</p>
     </div>
+
+    <!-- Mobile tip -->
+    <div id="tutorial-mobile-tip" style="display:none;background:rgba(196,119,59,0.1);border:1px solid rgba(196,119,59,0.2);border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="color:#c4773b;font-size:13px;font-weight:600;margin-bottom:6px">En tu telefono:</div>
+      <div style="color:rgba(255,255,255,0.6);font-size:12px;line-height:1.5">
+        Desliza a la <strong style="color:#fff">izquierda</strong> para ver el Preview (tour, galeria).<br>
+        Desliza a la <strong style="color:#fff">derecha</strong> para volver al Chat.<br>
+        Toca <strong style="color:#fff">Preview</strong> arriba a la derecha para cambiar de vista.
+      </div>
+    </div>
+    <script>if(window.innerWidth<=768)document.getElementById('tutorial-mobile-tip').style.display='';</script>
 
     <!-- Tutorial steps -->
     <div id="tutorial-steps">
@@ -1835,8 +1843,8 @@ function deleteProject(idx) {
     </div>
 
     <div style="text-align:center;margin-top:24px">
-      <button onclick="closeTutorial()" style="background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:12px;padding:16px 48px;font-size:16px;font-weight:700;cursor:pointer">🚀 ¡Empezar a crear!</button>
-      <p style="color:var(--muted);font-size:11px;margin-top:12px">Puedes volver a ver este tutorial desde Opciones</p>
+      <button onclick="closeTutorial()" style="background:#c4773b;color:#fff;border:none;border-radius:10px;padding:14px 40px;font-size:15px;font-weight:600;cursor:pointer;transition:opacity 0.2s" onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'">Empezar</button>
+      <p style="color:rgba(255,255,255,0.2);font-size:10px;margin-top:12px">Este tutorial aparece cada vez que inicias sesion</p>
     </div>
   </div>
 </div>
