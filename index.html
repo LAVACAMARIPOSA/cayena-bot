@@ -955,9 +955,8 @@ function doLogin() {
       badge.style.display = 'flex';
       badge.title = `${__currentUser.name} (${__currentUser.id}) — Click para cambiar usuario`;
     }
-    if (!localStorage.getItem('cayenabot_tutorial_seen')) {
-      setTimeout(() => showTutorial(), 500);
-    }
+    // Tutorial always shows on login
+    setTimeout(() => showTutorial(), 500);
   } else {
     errEl.textContent = pass === '' ? 'Ingresa tu clave' : 'Clave incorrecta';
     errEl.style.display = '';
