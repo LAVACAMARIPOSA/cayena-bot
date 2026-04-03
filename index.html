@@ -2178,16 +2178,18 @@ async function sendChat() {
     model = 'google/gemini-2.5-pro-exp-03-25:free';
   }
 
-  // Fallback models to try if primary fails
-  const fallbackModels = [
-    model,
+  // Use discovered free models if available, else hardcoded fallbacks
+  const discovered = state.freeModels || [];
+  const fallbackModels = [model, ...discovered,
     'google/gemini-2.5-pro-exp-03-25:free',
     'deepseek/deepseek-chat-v3-0324:free',
     'meta-llama/llama-3.3-70b-instruct:free',
     'mistralai/mistral-small-3.1-24b-instruct:free',
     'deepseek/deepseek-r1-zero:free',
-    'nvidia/llama-3.1-nemotron-nano-8b-v1:free'
-  ].filter((v, i, a) => a.indexOf(v) === i); // dedupe
+    'nvidia/llama-3.1-nemotron-nano-8b-v1:free',
+    'qwen/qwen2.5-vl-3b-instruct:free',
+    'moonshotai/kimi-vl-a3b-thinking:free'
+  ].filter((v, i, a) => a.indexOf(v) === i && v.endsWith(':free'));
 
   let reply = null;
   let lastError = '';
@@ -3143,6 +3145,38 @@ async function extractZip(file) {
 }
 
 // =============================================
+// DISCOVER FREE MODELS FROM OPENROUTER
+// =============================================
+async function discoverFreeModels() {
+  try {
+    const resp = await fetch('https://openrouter.ai/api/v1/models', {
+      headers: { 'Authorization': `Bearer ${state.orKey}` }
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const freeModels = (data.data || [])
+      .filter(m => m.id && m.id.endsWith(':free'))
+      .sort((a, b) => (b.context_length || 0) - (a.context_length || 0))
+      .slice(0, 20);
+
+    if (freeModels.length === 0) return;
+
+    state.freeModels = freeModels.map(m => m.id);
+
+    // Update the dropdown
+    const select = document.getElementById('chat-model-select');
+    select.innerHTML = freeModels.map((m, i) => {
+      const name = m.name || m.id.split('/')[1] || m.id;
+      return `<option value="${m.id}"${i === 0 ? ' selected' : ''}>${name}</option>`;
+    }).join('');
+
+    console.log('Discovered', freeModels.length, 'free models');
+  } catch(e) {
+    console.log('Model discovery failed, using defaults');
+  }
+}
+
+// =============================================
 // INIT
 // =============================================
 function init() {
@@ -3179,6 +3213,9 @@ function init() {
 
   // Init GLTF loader for 3D assets
   if (typeof THREE !== 'undefined') initGLTFLoader();
+
+  // Discover available free models from OpenRouter
+  discoverFreeModels();
 
   showToast('🏗️ CayenaBot listo — cuéntame sobre tu proyecto');
   // Try load saved project
