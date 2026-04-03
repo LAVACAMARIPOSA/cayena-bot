@@ -1485,29 +1485,37 @@ function deleteProject(idx) {
       <span style="font-size:11px">Las keys vienen preconfiguradas. Puedes cambiarlas o añadir Together.ai para renders premium.</span>
     </div>
     <div class="settings-field">
-      <label>OpenRouter API Key</label>
+      <label>OpenRouter API Key <span style="color:var(--gold);font-weight:400">(principal — chat + renders gratis)</span></label>
       <input type="password" id="or-key-input" placeholder="sk-or-v1-...">
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">Solo modelos <strong>:free</strong> — tu saldo nunca se consume. <a href="https://openrouter.ai/settings/keys" target="_blank" style="color:var(--blue)">Obtener key gratis</a></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Modelos gratis ilimitados. <a href="https://openrouter.ai/settings/keys" target="_blank" style="color:var(--blue)">Obtener key gratis</a></div>
       <div class="settings-status" id="or-status"></div>
     </div>
     <div class="settings-field">
-      <label>HuggingFace API Key <span style="color:var(--muted);font-weight:400">(gratis — renders + generación de VIDEO)</span></label>
-      <input type="password" id="hf-key-input" placeholder="hf_...">
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">Token gratuito en <a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--blue)">huggingface.co/settings/tokens</a> — habilita generación de video AI.</div>
-      <div class="settings-status" id="hf-status"></div>
+      <label>OpenAI API Key <span style="color:var(--muted);font-weight:400">(opcional — GPT-4o)</span></label>
+      <input type="password" id="openai-key-input" placeholder="sk-...">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Pagado. Mejor calidad de chat. <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--blue)">Obtener key</a></div>
     </div>
     <div class="settings-field">
-      <label>Together.ai API Key <span style="color:var(--muted);font-weight:400">(opcional — renders premium FLUX.1)</span></label>
-      <input type="password" id="together-key-input" placeholder="tok_...">
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">$1 gratis al registrarte = ~1,000 renders. <a href="https://api.together.xyz/settings/api-keys" target="_blank" style="color:var(--blue)">Obtener key</a></div>
-      <div class="settings-status" id="together-status"></div>
+      <label>Claude API Key <span style="color:var(--muted);font-weight:400">(opcional — Claude Sonnet 4)</span></label>
+      <input type="password" id="claude-key-input" placeholder="sk-ant-...">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Pagado. Excelente para análisis técnico. <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--blue)">Obtener key</a></div>
     </div>
     <div class="settings-field">
-      <label>Stable Diffusion Local URL <span style="color:var(--muted);font-weight:400">(opcional — renders ilimitados GRATIS)</span></label>
+      <label>Groq API Key <span style="color:var(--muted);font-weight:400">(opcional — Llama 3.3 ultrarrápido, gratis)</span></label>
+      <input type="password" id="groq-key-input" placeholder="gsk_...">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Gratis y muy rápido. <a href="https://console.groq.com/keys" target="_blank" style="color:var(--blue)">Obtener key gratis</a></div>
+    </div>
+    <div class="settings-field">
+      <label>Stable Diffusion Local URL <span style="color:var(--muted);font-weight:400">(opcional — renders ilimitados)</span></label>
       <input type="text" id="local-sd-url-input" placeholder="http://localhost:7860">
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">Instala <a href="https://github.com/AUTOMATIC1111/stable-diffusion-webui" target="_blank" style="color:var(--blue)">Stable Diffusion WebUI</a> con <code>--api --listen --cors-allow-origins=*</code>. Renders ilimitados sin costo.</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Para renders locales con Draw Things o SD WebUI</div>
       <div class="settings-status" id="local-sd-status"></div>
     </div>
+    <!-- Hidden but kept for compatibility -->
+    <input type="hidden" id="hf-key-input" value="">
+    <input type="hidden" id="together-key-input" value="">
+    <div id="hf-status" style="display:none"></div>
+    <div id="together-status" style="display:none"></div>
     <button id="settings-test-btn" onclick="testConnections()">🔗 Probar Conexión</button>
     <button onclick="diagRenders()" style="background:var(--card);color:var(--text);border:1px solid var(--border)">🔍 Diagnosticar Renders</button>
     <button onclick="runFullTest()" style="background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none">🧪 Test Completo de TODAS las funciones</button>
@@ -2409,6 +2417,9 @@ const state = {
   hfKey: '',
   togetherKey: '',
   localSdUrl: '',
+  openaiKey: '',
+  claudeKey: '',
+  groqKey: '',
   chatModel: 'google/gemini-2.5-pro-exp-03-25:free',
   renderResultData: null,
   lightboxIdx: 0,
@@ -3385,65 +3396,98 @@ async function sendChat() {
   const orKey = state.orKey;
   let model = document.getElementById('chat-model-select').value;
 
-  // SAFETY: Force free models only — never spend credits
-  if (!model.endsWith(':free')) {
-    model = 'google/gemini-2.5-pro-exp-03-25:free';
+  // Build provider list: try user's selected model first, then fallbacks
+  // Support multiple providers: OpenRouter (free), OpenAI, Claude, Groq
+  const chatProviders = [];
+
+  // Provider 1: User's selected model via OpenRouter
+  if (model.endsWith(':free') || !state.openaiKey && !state.claudeKey && !state.groqKey) {
+    if (!model.endsWith(':free')) model = 'google/gemini-2.5-pro-exp-03-25:free';
   }
 
-  // Use discovered free models if available, else hardcoded fallbacks
+  // Provider 2: Groq (fast, free tier generous)
+  if (state.groqKey) {
+    chatProviders.push({ type: 'groq', model: 'llama-3.3-70b-versatile', key: state.groqKey });
+  }
+
+  // Provider 3: OpenAI
+  if (state.openaiKey) {
+    chatProviders.push({ type: 'openai', model: 'gpt-4o-mini', key: state.openaiKey });
+  }
+
+  // Provider 4: Claude
+  if (state.claudeKey) {
+    chatProviders.push({ type: 'claude', model: 'claude-sonnet-4-20250514', key: state.claudeKey });
+  }
+
+  // OpenRouter free models (always available as fallback)
   const discovered = state.freeModels || [];
-  const fallbackModels = [model, ...discovered,
+  const orModels = [model, ...discovered,
     'google/gemini-2.5-pro-exp-03-25:free',
+    'google/gemini-2.5-flash-preview-05-20:free',
     'deepseek/deepseek-chat-v3-0324:free',
     'meta-llama/llama-3.3-70b-instruct:free',
-    'mistralai/mistral-small-3.1-24b-instruct:free',
-    'deepseek/deepseek-r1-zero:free',
-    'nvidia/llama-3.1-nemotron-nano-8b-v1:free',
-    'qwen/qwen2.5-vl-3b-instruct:free',
-    'moonshotai/kimi-vl-a3b-thinking:free'
-  ].filter((v, i, a) => a.indexOf(v) === i && v.endsWith(':free'));
+    'qwen/qwen3-235b-a22b:free',
+    'mistralai/mistral-small-3.1-24b-instruct:free'
+  ].filter((v, i, a) => a.indexOf(v) === i);
+  orModels.forEach(m => chatProviders.push({ type: 'openrouter', model: m, key: state.orKey }));
 
   let reply = null;
   let lastError = '';
+  const msgs = [{ role: 'system', content: SYSTEM_PROMPT }, ...state.chatHistory.slice(-12)];
 
-  for (const tryModel of fallbackModels) {
+  for (const prov of chatProviders) {
     try {
-      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${orKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': window.location.origin || 'https://cayenabot.ai',
-          'X-Title': 'CayenaBot'
-        },
-        body: JSON.stringify({
-          model: tryModel,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            ...state.chatHistory.slice(-12)
-          ],
-          max_tokens: 1500
-        })
+      let url, headers, body;
+
+      if (prov.type === 'groq') {
+        url = 'https://api.groq.com/openai/v1/chat/completions';
+        headers = { 'Authorization': `Bearer ${prov.key}`, 'Content-Type': 'application/json' };
+        body = { model: prov.model, messages: msgs, max_tokens: 1500 };
+      } else if (prov.type === 'openai') {
+        url = 'https://api.openai.com/v1/chat/completions';
+        headers = { 'Authorization': `Bearer ${prov.key}`, 'Content-Type': 'application/json' };
+        body = { model: prov.model, messages: msgs, max_tokens: 1500 };
+      } else if (prov.type === 'claude') {
+        url = 'https://api.anthropic.com/v1/messages';
+        headers = { 'x-api-key': prov.key, 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+        body = { model: prov.model, max_tokens: 1500, system: SYSTEM_PROMPT, messages: state.chatHistory.slice(-12).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })) };
+      } else {
+        // OpenRouter
+        url = 'https://openrouter.ai/api/v1/chat/completions';
+        headers = { 'Authorization': `Bearer ${prov.key}`, 'Content-Type': 'application/json', 'HTTP-Referer': window.location.origin || 'https://cayenabot.ai', 'X-Title': 'CayenaBot' };
+        body = { model: prov.model, messages: msgs, max_tokens: 1500 };
+      }
+
+      const resp = await fetch(url, {
+        method: 'POST', signal: AbortSignal.timeout(30000),
+        headers, body: JSON.stringify(body)
       });
 
       if (resp.ok) {
         const data = await resp.json();
-        reply = data.choices?.[0]?.message?.content || null;
-        if (reply) break;
+        if (prov.type === 'claude') {
+          reply = data.content?.[0]?.text || null;
+        } else {
+          reply = data.choices?.[0]?.message?.content || null;
+        }
+        if (reply) {
+          console.log(`Chat: ${prov.type}/${prov.model} ✅`);
+          break;
+        }
       } else {
         const err = await resp.json().catch(() => ({}));
-        lastError = err?.error?.message || `Error ${resp.status}`;
-        // Auth error = stop trying
+        lastError = err?.error?.message || `${prov.type}: HTTP ${resp.status}`;
         if (resp.status === 401 || resp.status === 403) {
+          if (prov.type !== 'openrouter') continue; // skip auth errors on non-primary
           removeEl(thinkEl);
-          addMsg('assistant', `⚠️ <strong>Error de autenticación:</strong> ${lastError}<br><br>Ve a ⚙️ <strong>Configuración</strong> para actualizar tu API key.<br><a href="https://openrouter.ai/settings/keys" target="_blank" style="color:var(--blue)">→ Obtener nueva key en OpenRouter</a>`);
+          addMsg('assistant', `⚠️ <strong>Error de autenticación:</strong> ${lastError}`);
           return;
         }
-        // "No endpoints" = try next model
         continue;
       }
     } catch(e) {
-      lastError = e.message;
+      lastError = `${prov.type}: ${e.message}`;
       continue;
     }
   }
@@ -4814,11 +4858,11 @@ function downloadRender() {
 // =============================================
 function openSettings() {
   document.getElementById('or-key-input').value = state.orKey || '';
-  document.getElementById('hf-key-input').value = state.hfKey || '';
-  document.getElementById('together-key-input').value = state.togetherKey || '';
+  document.getElementById('openai-key-input').value = state.openaiKey || '';
+  document.getElementById('claude-key-input').value = state.claudeKey || '';
+  document.getElementById('groq-key-input').value = state.groqKey || '';
   document.getElementById('local-sd-url-input').value = state.localSdUrl || '';
   document.getElementById('or-status').innerHTML = '';
-  document.getElementById('hf-status').innerHTML = '';
   document.getElementById('local-sd-status').innerHTML = '';
   document.getElementById('settings-modal').classList.add('open');
 }
@@ -4827,14 +4871,27 @@ function closeSettings() {
 }
 function saveSettings() {
   const orVal = document.getElementById('or-key-input').value.trim();
-  const hfVal = document.getElementById('hf-key-input').value.trim();
   if (orVal) { state.orKey = orVal; localStorage.setItem('cayenabot_or_key', orVal); }
-  if (hfVal) { state.hfKey = hfVal; localStorage.setItem('cayenabot_hf_key', hfVal); }
-  const togVal = document.getElementById('together-key-input').value.trim();
-  if (togVal) { state.togetherKey = togVal; localStorage.setItem('cayenabot_together_key', togVal); }
+
+  const openaiVal = document.getElementById('openai-key-input').value.trim();
+  if (openaiVal) { state.openaiKey = openaiVal; localStorage.setItem('cayenabot_openai_key', openaiVal); }
+  else { state.openaiKey = ''; localStorage.removeItem('cayenabot_openai_key'); }
+
+  const claudeVal = document.getElementById('claude-key-input').value.trim();
+  if (claudeVal) { state.claudeKey = claudeVal; localStorage.setItem('cayenabot_claude_key', claudeVal); }
+  else { state.claudeKey = ''; localStorage.removeItem('cayenabot_claude_key'); }
+
+  const groqVal = document.getElementById('groq-key-input').value.trim();
+  if (groqVal) { state.groqKey = groqVal; localStorage.setItem('cayenabot_groq_key', groqVal); }
+  else { state.groqKey = ''; localStorage.removeItem('cayenabot_groq_key'); }
+
   const sdVal = document.getElementById('local-sd-url-input').value.trim().replace(/\/+$/, '');
   if (sdVal) { state.localSdUrl = sdVal; localStorage.setItem('cayenabot_local_sd_url', sdVal); }
   else { state.localSdUrl = ''; localStorage.removeItem('cayenabot_local_sd_url'); }
+
+  // Refresh model list with new keys
+  discoverFreeModels();
+
   closeSettings();
   showToast('✅ Configuración guardada');
 }
@@ -6254,6 +6311,9 @@ async function extractZip(file) {
 // =============================================
 // DISCOVER FREE MODELS FROM OPENROUTER
 // =============================================
+// Known dead/broken models on OpenRouter free tier — skip these
+const __DEAD_MODELS = ['moonshotai/kimi-vl-a3b-thinking:free', 'moonshotai/kimi-vl-a3b:free'];
+
 async function discoverFreeModels() {
   try {
     const resp = await fetch('https://openrouter.ai/api/v1/models', {
@@ -6261,39 +6321,54 @@ async function discoverFreeModels() {
     });
     if (!resp.ok) return;
     const data = await resp.json();
-    const allFree = (data.data || []).filter(m => m.id && m.id.endsWith(':free'));
+    const allFree = (data.data || []).filter(m =>
+      m.id && m.id.endsWith(':free') && !__DEAD_MODELS.includes(m.id)
+    );
 
     if (allFree.length === 0) return;
 
-    // Prioritize: large context, vision models first, then by params
     const scored = allFree.map(m => {
       let score = (m.context_length || 0) / 1000;
       const idLower = (m.id + ' ' + (m.name || '')).toLowerCase();
-      // Boost vision models (can see images)
-      if (idLower.includes('vl') || idLower.includes('vision')) score += 500;
-      // Boost large/capable models
-      if (idLower.includes('405b') || idLower.includes('480b') || idLower.includes('coder')) score += 300;
-      if (idLower.includes('super') || idLower.includes('nemotron')) score += 200;
+      // Boost reliable models
+      if (idLower.includes('gemini-2.5-pro')) score += 1000;
+      if (idLower.includes('gemini-2.5-flash')) score += 800;
+      if (idLower.includes('qwen3-235b')) score += 700;
+      if (idLower.includes('deepseek-chat-v3')) score += 600;
+      if (idLower.includes('llama-3.3-70b')) score += 500;
+      // Boost vision models
+      if (idLower.includes('vl') || idLower.includes('vision')) score += 200;
+      // Boost large models
       if (idLower.includes('70b') || idLower.includes('72b')) score += 100;
-      // Penalize tiny models
-      if (idLower.includes('1.2b') || idLower.includes('3b-instruct')) score -= 200;
+      // Penalize tiny/unreliable
+      if (idLower.includes('1.2b') || idLower.includes('3b-instruct') || idLower.includes('nano-8b')) score -= 300;
+      if (idLower.includes('kimi')) score -= 500; // unreliable
       return { ...m, score };
-    }).sort((a, b) => b.score - a.score).slice(0, 20);
+    }).sort((a, b) => b.score - a.score).slice(0, 15);
 
     state.freeModels = scored.map(m => m.id);
 
-    // Update dropdown with scored order
     const select = document.getElementById('chat-model-select');
     select.innerHTML = scored.map((m, i) => {
       const name = m.name || m.id.split('/')[1] || m.id;
-      const badge = (m.id + ' ' + (m.name || '')).toLowerCase().includes('vl') ? ' 👁️' : '';
-      return `<option value="${m.id}"${i === 0 ? ' selected' : ''}>${name}${badge}</option>`;
+      const badge = idHasVision(m.id) ? ' 👁️' : '';
+      const best = i === 0 ? ' (Mejor)' : '';
+      return `<option value="${m.id}"${i === 0 ? ' selected' : ''}>${name}${badge}${best}</option>`;
     }).join('');
+
+    // If user has own API keys, add them to dropdown
+    if (state.groqKey) select.innerHTML = `<option value="__groq__">🟢 Groq (tu key)</option>` + select.innerHTML;
+    if (state.openaiKey) select.innerHTML = `<option value="__openai__">🟣 OpenAI (tu key)</option>` + select.innerHTML;
+    if (state.claudeKey) select.innerHTML = `<option value="__claude__">🟠 Claude (tu key)</option>` + select.innerHTML;
 
     console.log('Discovered', scored.length, 'free models. Best:', scored[0]?.id);
   } catch(e) {
     console.log('Model discovery failed, using defaults');
   }
+}
+
+function idHasVision(id) {
+  return /vl|vision/i.test(id);
 }
 
 // =============================================
@@ -6310,6 +6385,12 @@ function init() {
   if (savedTogether) state.togetherKey = savedTogether;
   const savedSdUrl = localStorage.getItem('cayenabot_local_sd_url');
   if (savedSdUrl) state.localSdUrl = savedSdUrl;
+  const savedOpenai = localStorage.getItem('cayenabot_openai_key');
+  if (savedOpenai) state.openaiKey = savedOpenai;
+  const savedClaude = localStorage.getItem('cayenabot_claude_key');
+  if (savedClaude) state.claudeKey = savedClaude;
+  const savedGroq = localStorage.getItem('cayenabot_groq_key');
+  if (savedGroq) state.groqKey = savedGroq;
   
   // Don't auto-load — user selects project from project selector after login
   __setupAutoSave();
