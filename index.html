@@ -1001,6 +1001,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="toolbar-btn" onclick="exportProject()">⬇️ Exportar</button>
       <button class="toolbar-btn" onclick="document.getElementById('import-input').click()">📂 Importar</button>
       <button class="toolbar-btn" onclick="document.getElementById('upload-input').click()">📎 Subir archivos</button>
+      <button class="toolbar-btn" id="swarm-toggle-btn" onclick="toggleSwarmPanel()" style="display:none">⚡ Swarm</button>
       <input type="file" id="import-input" accept=".json" style="display:none" onchange="importProject(this.files[0]);this.value=''">
       <input type="file" id="upload-input" accept="image/*,.zip,.pdf,.dwg,.dxf,.skp,.fbx,.obj,.gltf,.glb,.3ds,.stl,.rvt" multiple style="display:none" onchange="handleFileUpload(this.files);this.value=''">
     </div>
@@ -2408,121 +2409,112 @@ function removeEl(el) {
 // =============================================
 // CENTRALIZED IMAGE GENERATION (multi-provider fallback)
 // =============================================
-let __imgGenActive = 0; // concurrency limiter
+let __imgGenActive = 0;
 const __IMG_MAX_CONCURRENT = 3;
+let __workingProvider = null; // cache which provider works to skip slow discovery
 
 async function generateImage(prompt, opts = {}) {
-  const fast = opts.fast || false; // swarm mode: shorter timeouts, fewer retries
-  const hfKey = () => state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
+  const fast = opts.fast || false;
+  const getHfKey = () => state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
 
-  // Concurrency gate — wait for a slot
+  // Concurrency gate
   while (__imgGenActive >= __IMG_MAX_CONCURRENT) {
-    await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
+    await new Promise(r => setTimeout(r, 300 + Math.random() * 400));
   }
   __imgGenActive++;
 
-  // HuggingFace free inference helper
-  const hfImg = (model, params={}) => async () => {
-    const k = hfKey(); if (!k) throw new Error('No HF key');
+  // HuggingFace helper
+  const hfImg = (id, model, params={}) => ({ id, fn: async () => {
+    const k = getHfKey(); if (!k) throw new Error('No HF key');
     const r = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
-      method: 'POST', signal: AbortSignal.timeout(fast ? 45000 : 90000),
-      headers: { 'Authorization': `Bearer ${k.trim()}`, 'Content-Type': 'application/json', 'x-wait-for-model': 'true' },
-      body: JSON.stringify({ inputs: prompt, parameters: { width: 1024, height: 576, num_inference_steps: 20, guidance_scale: 7.5, ...params } })
+      method: 'POST', signal: AbortSignal.timeout(fast ? 30000 : 90000),
+      headers: { 'Authorization': `Bearer ${k.trim()}`, 'Content-Type': 'application/json', 'x-wait-for-model': fast ? 'false' : 'true' },
+      body: JSON.stringify({ inputs: prompt, parameters: { width: 1024, height: 576, ...params } })
     });
+    if (r.status === 503) throw new Error(`HF ${model.split('/')[1]} loading`);
     if (!r.ok) throw new Error(`HF ${model.split('/')[1]} ${r.status}`);
     const blob = await r.blob();
-    if (blob.size < 500) throw new Error('HF empty response');
+    if (blob.size < 500) throw new Error('HF empty');
     return URL.createObjectURL(blob);
-  };
+  }});
 
-  const providers = [
-    // 0. HuggingFace FLUX.1-schnell — fastest, highest quality (free token required)
-    hfImg('black-forest-labs/FLUX.1-schnell', { num_inference_steps: 4, guidance_scale: 0 }),
-    // 1. HuggingFace SDXL-Lightning — very fast (free token required)
-    hfImg('ByteDance/SDXL-Lightning', { num_inference_steps: 4 }),
-    // 2. HuggingFace FLUX.1-dev (free token required)
-    hfImg('black-forest-labs/FLUX.1-dev', { num_inference_steps: 20 }),
-    // 3. Pollinations.ai FLUX (free, no key needed)
-    async () => {
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=720&model=flux&nologo=true&seed=${Date.now()}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(fast ? 20000 : 45000) });
-      if (!r.ok) throw new Error('Pollinations ' + r.status);
-      const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Pollinations empty');
-      return URL.createObjectURL(blob);
-    },
-    // 4. Pollinations.ai turbo (free, no key needed)
-    async () => {
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=turbo&nologo=true&seed=${Date.now()+1}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(fast ? 20000 : 45000) });
-      if (!r.ok) throw new Error('Pollinations turbo ' + r.status);
-      const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Pollinations turbo empty');
-      return URL.createObjectURL(blob);
-    }
+  const pollinationsImg = (id, model, w, h) => ({ id, fn: async () => {
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${model}&nologo=true&seed=${Date.now()}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(fast ? 15000 : 45000) });
+    if (!r.ok) throw new Error('Pollinations ' + r.status);
+    const blob = await r.blob();
+    if (blob.size < 500) throw new Error('Pollinations empty');
+    return URL.createObjectURL(blob);
+  }});
+
+  const allProviders = [
+    hfImg('hf-flux-schnell', 'black-forest-labs/FLUX.1-schnell', { num_inference_steps: 4, guidance_scale: 0 }),
+    hfImg('hf-sdxl-lightning', 'ByteDance/SDXL-Lightning', { num_inference_steps: 4 }),
+    pollinationsImg('poll-flux', 'flux', 1280, 720),
+    pollinationsImg('poll-turbo', 'turbo', 1024, 576),
+    hfImg('hf-flux-dev', 'black-forest-labs/FLUX.1-dev', { num_inference_steps: 20 }),
+    hfImg('hf-sdxl-base', 'stabilityai/stable-diffusion-xl-base-1.0', { num_inference_steps: 25, guidance_scale: 7.5 })
   ];
 
-  // In fast mode, skip slow providers (Stable Horde, Gemini)
-  if (!fast) {
-    providers.push(
-      // 5. Stable Horde — community GPUs, completely free, no key needed (slow ~1-2 min)
-      async () => {
+  // If we know a working provider, try it first
+  let providers;
+  if (__workingProvider) {
+    const cached = allProviders.find(p => p.id === __workingProvider);
+    if (cached) {
+      providers = [cached, ...allProviders.filter(p => p.id !== __workingProvider)];
+    } else {
+      providers = allProviders;
+    }
+  } else {
+    providers = allProviders;
+  }
+
+  // In fast mode, only try first 4 providers max
+  if (fast) providers = providers.slice(0, 4);
+
+  const errors = [];
+  try {
+    for (const { id, fn } of providers) {
+      try {
+        const result = await fn();
+        if (result) {
+          __workingProvider = id; // cache working provider
+          return result;
+        }
+      } catch(e) {
+        errors.push(id + ': ' + e.message);
+        console.log('ImgGen failed:', id, e.message);
+      }
+    }
+
+    // Last resort for non-fast mode: Stable Horde (anonymous, slow)
+    if (!fast) {
+      try {
         const sub = await fetch('https://stablehorde.net/api/v2/generate/async', {
           method: 'POST', signal: AbortSignal.timeout(15000),
           headers: { 'Content-Type': 'application/json', 'apikey': '0000000000' },
           body: JSON.stringify({ prompt, params: { width: 512, height: 512, steps: 20, sampler_name: 'k_euler', karras: true, n: 1 }, models: ['stable_diffusion_xl'] })
         });
-        if (!sub.ok) throw new Error('Horde submit ' + sub.status);
-        const { id } = await sub.json();
-        if (!id) throw new Error('No Horde job id');
-        for (let i = 0; i < 40; i++) {
-          await new Promise(r => setTimeout(r, 4000));
-          const check = await fetch(`https://stablehorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
-          const c = await check.json();
-          if (c.done) {
-            const st = await fetch(`https://stablehorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(5000) });
-            const s = await st.json();
-            const b64 = s.generations?.[0]?.img;
-            if (b64) return `data:image/webp;base64,${b64}`;
-            throw new Error('No Horde image');
+        if (sub.ok) {
+          const { id } = await sub.json();
+          if (id) {
+            for (let i = 0; i < 40; i++) {
+              await new Promise(r => setTimeout(r, 4000));
+              const check = await fetch(`https://stablehorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
+              const c = await check.json();
+              if (c.done) {
+                const st = await fetch(`https://stablehorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(5000) });
+                const s = await st.json();
+                const b64 = s.generations?.[0]?.img;
+                if (b64) return `data:image/webp;base64,${b64}`;
+              }
+              if (c.faulted) break;
+            }
           }
-          if (c.faulted) throw new Error('Horde job faulted');
         }
-        throw new Error('Horde timeout');
-      },
-      // 6. OpenRouter Gemini 2.0 Flash image generation
-      async () => {
-        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST', signal: AbortSignal.timeout(60000),
-          headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
-          body: JSON.stringify({ model: 'google/gemini-2.0-flash-exp:free', modalities: ['image', 'text'], messages: [{ role: 'user', content: `Generate a photorealistic architectural render: ${prompt}` }] })
-        });
-        if (!resp.ok) throw new Error('OR-Gemini ' + resp.status);
-        const d = await resp.json();
-        const parts = d.choices?.[0]?.message?.content;
-        if (Array.isArray(parts)) {
-          const ip = parts.find(p => p.type === 'image_url' || p.inline_data);
-          if (ip?.image_url?.url) return ip.image_url.url;
-          if (ip?.inline_data?.data) return `data:${ip.inline_data.mime_type||'image/png'};base64,${ip.inline_data.data}`;
-        }
-        throw new Error('No image in Gemini response');
-      },
-      // 7. HuggingFace SDXL base (free token required)
-      hfImg('stabilityai/stable-diffusion-xl-base-1.0', { num_inference_steps: 25 })
-    );
-  }
-
-  const errors = [];
-  try {
-    for (const provider of providers) {
-      try {
-        const result = await provider();
-        if (result) return result;
-      } catch(e) {
-        errors.push(e.message);
-        console.log('Image provider failed:', e.message);
-      }
+      } catch(e) { errors.push('horde: ' + e.message); }
     }
+
     console.error('All image providers failed:', errors);
     return null;
   } finally {
@@ -2788,9 +2780,15 @@ let swarmState = {
 
 function openSwarm() {
   document.getElementById('swarm-overlay').classList.add('open');
+  document.getElementById('swarm-toggle-btn').style.display = '';
 }
 function closeSwarm() {
   document.getElementById('swarm-overlay').classList.remove('open');
+}
+function toggleSwarmPanel() {
+  const overlay = document.getElementById('swarm-overlay');
+  if (overlay.classList.contains('open')) { closeSwarm(); } else { openSwarm(); }
+}
 }
 
 function swarmLog(agentName, msg, type = '') {
@@ -3171,6 +3169,7 @@ function saveSettings() {
 
 async function testConnections() {
   const orKey = document.getElementById('or-key-input').value.trim() || state.orKey;
+  const hfKey = document.getElementById('hf-key-input').value.trim() || state.hfKey;
 
   // Test OpenRouter
   if (orKey) {
@@ -3190,7 +3189,49 @@ async function testConnections() {
       document.getElementById('or-status').innerHTML = `<span class="status-err">❌ ${e.message}</span>`;
     }
   }
-  
+
+  // Test HuggingFace
+  if (hfKey) {
+    document.getElementById('hf-status').innerHTML = '⏳ Probando conexión + render de prueba...';
+    try {
+      // First: validate token via whoami
+      const whoami = await fetch('https://huggingface.co/api/whoami-v2', {
+        headers: { 'Authorization': `Bearer ${hfKey.trim()}` },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!whoami.ok) {
+        document.getElementById('hf-status').innerHTML = `<span class="status-err">❌ Token inválido (${whoami.status})</span>`;
+        return;
+      }
+      const user = await whoami.json();
+      const username = user.name || user.fullname || 'usuario';
+
+      // Second: quick test image generation with FLUX.1-schnell
+      document.getElementById('hf-status').innerHTML = `⏳ Token OK (${username}) — probando render FLUX.1...`;
+      const imgResp = await fetch('https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell', {
+        method: 'POST', signal: AbortSignal.timeout(60000),
+        headers: { 'Authorization': `Bearer ${hfKey.trim()}`, 'Content-Type': 'application/json', 'x-wait-for-model': 'true' },
+        body: JSON.stringify({ inputs: 'luxury modern house exterior, tropical setting, golden hour', parameters: { num_inference_steps: 4, guidance_scale: 0, width: 512, height: 512 } })
+      });
+      if (imgResp.ok) {
+        const blob = await imgResp.blob();
+        if (blob.size > 500) {
+          __workingProvider = 'hf-flux-schnell'; // cache this as working
+          document.getElementById('hf-status').innerHTML = `<span class="status-ok">✅ ${username} — FLUX.1-schnell funcionando (renders + video habilitados)</span>`;
+        } else {
+          document.getElementById('hf-status').innerHTML = `<span class="status-ok">✅ ${username} — Token válido. FLUX.1 devolvió respuesta vacía, probando otros modelos al generar.</span>`;
+        }
+      } else if (imgResp.status === 503) {
+        document.getElementById('hf-status').innerHTML = `<span class="status-ok">✅ ${username} — Token válido. Modelo FLUX.1 cargando (normal, se resuelve al primer render).</span>`;
+      } else {
+        document.getElementById('hf-status').innerHTML = `<span class="status-ok">✅ ${username} — Token válido. Render test: ${imgResp.status} (se probará con otro modelo)</span>`;
+      }
+    } catch(e) {
+      document.getElementById('hf-status').innerHTML = `<span class="status-err">❌ ${e.message}</span>`;
+    }
+  } else {
+    document.getElementById('hf-status').innerHTML = '<span style="color:var(--muted)">Sin token — renders usarán Pollinations (más lento)</span>';
+  }
 }
 
 
