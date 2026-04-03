@@ -2426,8 +2426,37 @@ const __IMG_MAX_CONCURRENT = 3;
 // OpenRouter dedicated image generation models (free!)
 const __OR_IMAGE_MODELS = [
   'google/gemini-2.5-flash-image-preview:free',
+  'google/gemini-3.1-flash-image-preview:free',
   'google/gemini-2.0-flash-exp:free'
 ];
+
+// Extract image URL from OpenRouter message response
+function __extractImageFromMsg(msg) {
+  if (!msg) return null;
+  // Method A: images array (dedicated image models return data:image/png;base64,... here)
+  if (Array.isArray(msg.images)) {
+    for (const img of msg.images) {
+      const url = img?.image_url?.url || img?.url || (typeof img === 'string' ? img : null);
+      if (url) return url;
+    }
+  }
+  // Method B: content array with image parts
+  if (Array.isArray(msg.content)) {
+    for (const part of msg.content) {
+      if (part.type === 'image_url' && part.image_url?.url) return part.image_url.url;
+      if (part.type === 'image' && part.image_url?.url) return part.image_url.url;
+      if (part.inline_data?.data) return `data:${part.inline_data.mime_type || 'image/png'};base64,${part.inline_data.data}`;
+      // Some models return base64 directly in content parts
+      if (typeof part === 'string' && part.startsWith('data:image')) return part;
+    }
+  }
+  // Method C: base64 in string content
+  if (typeof msg.content === 'string') {
+    const m = msg.content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]{100,}/);
+    if (m) return m[0];
+  }
+  return null;
+}
 
 async function generateImage(prompt, opts = {}) {
   const fast = opts.fast || false;
@@ -2441,59 +2470,56 @@ async function generateImage(prompt, opts = {}) {
   try {
     // === PRIMARY: OpenRouter image generation (FREE, same key as chat!) ===
     for (const model of __OR_IMAGE_MODELS) {
-      try {
-        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          signal: AbortSignal.timeout(fast ? 30000 : 60000),
-          headers: {
-            'Authorization': `Bearer ${state.orKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': location.href,
-            'X-Title': 'CayenaBot'
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: [{
-              role: 'user',
-              content: `Generate a photorealistic architectural render image. Only output the image, no text. Image: ${prompt}`
-            }],
-            modalities: ['text', 'image']
-          })
-        });
+      // Retry up to 2 times per model (handles 429 rate limits)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
 
-        if (!resp.ok) {
-          console.log(`OR image ${model}: HTTP ${resp.status}`);
-          continue;
-        }
+          const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            signal: AbortSignal.timeout(fast ? 45000 : 90000),
+            headers: {
+              'Authorization': `Bearer ${state.orKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': location.href,
+              'X-Title': 'CayenaBot'
+            },
+            body: JSON.stringify({
+              model: model,
+              messages: [{
+                role: 'user',
+                content: [{ type: 'text', text: `Generate a high quality photorealistic image of: ${prompt}` }]
+              }],
+              modalities: ['image', 'text']
+            })
+          });
 
-        const d = await resp.json();
-        const msg = d.choices?.[0]?.message;
-
-        // Method A: images array (dedicated image models)
-        if (Array.isArray(msg?.images)) {
-          for (const img of msg.images) {
-            if (img.image_url?.url) return img.image_url.url;
-            if (img.url) return img.url;
+          if (resp.status === 429) {
+            console.log(`OR image ${model}: rate limited (429), retrying...`);
+            await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
+            continue;
           }
-        }
 
-        // Method B: content array with image parts
-        if (Array.isArray(msg?.content)) {
-          for (const part of msg.content) {
-            if (part.type === 'image_url' && part.image_url?.url) return part.image_url.url;
-            if (part.inline_data?.data) return `data:${part.inline_data.mime_type || 'image/png'};base64,${part.inline_data.data}`;
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => '');
+            console.log(`OR image ${model}: HTTP ${resp.status}`, errText.slice(0, 200));
+            break; // Don't retry non-429 errors, try next model
           }
-        }
 
-        // Method C: base64 in string content
-        if (typeof msg?.content === 'string') {
-          const b64Match = msg.content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
-          if (b64Match) return b64Match[0];
-        }
+          const d = await resp.json();
+          const msg = d.choices?.[0]?.message;
+          const imgUrl = __extractImageFromMsg(msg);
 
-        console.log(`OR image ${model}: no image. Response:`, JSON.stringify(msg).slice(0, 300));
-      } catch(e) {
-        console.log(`OR image ${model}:`, e.message);
+          if (imgUrl) {
+            console.log(`OR image ${model}: ✅ image generated!`);
+            return imgUrl;
+          }
+
+          console.log(`OR image ${model}: response without image:`, JSON.stringify(msg).slice(0, 500));
+          break; // Got response but no image, try next model
+        } catch(e) {
+          console.log(`OR image ${model} attempt ${attempt}:`, e.message);
+        }
       }
     }
 
@@ -3024,18 +3050,15 @@ async function runSwarm(projectInfo) {
     await Promise.allSettled(batch.map(agent => executeAgent(agent)));
   }
 
-  // Phase 2: Run render agents in small batches with delays to respect rate limits
-  swarmLog('Coordinator', `🎨 Fase 2: ${renderAgents.length} renders (2 simultáneos, backoff para rate limits)`);
-  const RENDER_BATCH = 2; // only 2 concurrent renders to avoid 429
-  for (let i = 0; i < renderAgents.length; i += RENDER_BATCH) {
-    const batch = renderAgents.slice(i, i + RENDER_BATCH);
-    const batchNum = Math.floor(i/RENDER_BATCH)+1;
-    const totalBatches = Math.ceil(renderAgents.length/RENDER_BATCH);
-    swarmLog('Coordinator', `🎨 Render batch ${batchNum}/${totalBatches}`);
-    await Promise.allSettled(batch.map(agent => executeAgent(agent)));
-    // Pause between render batches to avoid 429
-    if (i + RENDER_BATCH < renderAgents.length) {
-      await new Promise(r => setTimeout(r, 1500 + Math.random() * 1000));
+  // Phase 2: Run render agents ONE at a time with delays (free API rate limits)
+  swarmLog('Coordinator', `🎨 Fase 2: ${renderAgents.length} renders (1 a la vez, con pausa entre cada uno)`);
+  for (let i = 0; i < renderAgents.length; i++) {
+    const agent = renderAgents[i];
+    swarmLog('Coordinator', `🎨 Render ${i+1}/${renderAgents.length}: ${agent.task}`);
+    await executeAgent(agent);
+    // Pause between renders to respect free tier rate limits (20 req/min)
+    if (i < renderAgents.length - 1) {
+      await new Promise(r => setTimeout(r, 4000 + Math.random() * 2000));
     }
   }
 
@@ -3364,46 +3387,39 @@ async function diagRenders() {
       return { size: b64.length, url: `data:image/png;base64,${b64}` };
     }},
     { name: 'OpenRouter Gemini Image (GRATIS)', fn: async (row) => {
-      const models = ['google/gemini-2.5-flash-image-preview:free', 'google/gemini-2.0-flash-exp:free'];
+      const models = ['google/gemini-2.5-flash-image-preview:free', 'google/gemini-3.1-flash-image-preview:free', 'google/gemini-2.0-flash-exp:free'];
+      const errors = [];
       for (const model of models) {
-        row.innerHTML = `<span>⏳</span> <strong>Probando ${model.split('/')[1]}</strong>...`;
+        const shortName = model.split('/')[1].replace(':free','');
+        row.innerHTML = `<span>⏳</span> <strong>Probando ${shortName}</strong>... (puede tardar 30-60s)`;
         try {
           const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST', signal: AbortSignal.timeout(60000),
+            method: 'POST', signal: AbortSignal.timeout(90000),
             headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
             body: JSON.stringify({
               model,
-              messages: [{ role: 'user', content: 'Generate a photorealistic image of: ' + testPrompt }],
-              modalities: ['text', 'image']
+              messages: [{ role: 'user', content: [{ type: 'text', text: 'Generate a high quality photorealistic image of: ' + testPrompt }] }],
+              modalities: ['image', 'text']
             })
           });
-          if (!resp.ok) { console.log(model, 'HTTP', resp.status, await resp.text().catch(()=>'')); continue; }
-          const d = await resp.json();
+          const respText = await resp.text();
+          if (!resp.ok) {
+            errors.push(`${shortName}: HTTP ${resp.status} - ${respText.slice(0,150)}`);
+            continue;
+          }
+          const d = JSON.parse(respText);
           const msg = d.choices?.[0]?.message;
-          // Check images array (dedicated image models)
-          if (Array.isArray(msg?.images)) {
-            for (const img of msg.images) {
-              if (img.image_url?.url) return { size: img.image_url.url.length, url: img.image_url.url };
-              if (img.url) return { size: 0, url: img.url };
-            }
+          const imgUrl = __extractImageFromMsg(msg);
+          if (imgUrl) {
+            return { size: imgUrl.length, url: imgUrl, model: shortName };
           }
-          // Check content array
-          if (Array.isArray(msg?.content)) {
-            for (const part of msg.content) {
-              if (part.type === 'image_url' && part.image_url?.url) return { size: 0, url: part.image_url.url };
-              if (part.inline_data?.data) return { size: part.inline_data.data.length, url: `data:${part.inline_data.mime_type||'image/png'};base64,${part.inline_data.data}` };
-            }
-          }
-          // Check string for base64
-          if (typeof msg?.content === 'string') {
-            const m = msg.content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
-            if (m) return { size: m[0].length, url: m[0] };
-          }
-          row.innerHTML = `<span>⚠️</span> <strong>${model.split('/')[1]}</strong>: respuesta sin imagen.<br><code style="font-size:10px;color:var(--muted);word-break:break-all">${JSON.stringify(msg).slice(0,250)}</code>`;
-          console.log(model, 'full response:', JSON.stringify(d));
-        } catch(e) { console.log(model, e.message); }
+          errors.push(`${shortName}: sin imagen - ${JSON.stringify(msg).slice(0,200)}`);
+          row.innerHTML = `<span>⚠️</span> <strong>${shortName}</strong>: respuesta sin imagen.<br><code style="font-size:10px;color:var(--muted);word-break:break-all;display:block;max-height:120px;overflow:auto">${JSON.stringify(d).slice(0,500)}</code>`;
+        } catch(e) {
+          errors.push(`${shortName}: ${e.message}`);
+        }
       }
-      throw new Error('Ver detalles arriba');
+      throw new Error(errors.join('<br>') || 'Todos los modelos fallaron');
     }}
   ];
 
