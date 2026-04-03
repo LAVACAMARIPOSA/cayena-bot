@@ -924,21 +924,96 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="planos-view" class="tab-view">
       <div style="overflow-y:auto;height:100%;padding:28px">
         <div style="margin-bottom:24px">
-          <h1 style="font-size:26px;font-weight:700;letter-spacing:-0.02em">🏗️ Planos Arquitectónicos</h1>
-          <p style="color:var(--muted);margin-top:6px;font-size:14px">Explora los planos del proyecto. Click en "Ver con IA" para generar una visualización 3D fotorrealista con FLUX AI — gratis e ilimitado.</p>
+          <h1 style="font-size:26px;font-weight:700;letter-spacing:-0.02em">🏗️ Planos Arquitectónicos AI</h1>
+          <p style="color:var(--muted);margin-top:6px;font-size:14px">Sube tu plano → el asistente te hace preguntas técnicas → analiza con precisión → pide modificaciones profesionales</p>
         </div>
-        
-        <!-- Upload own plan -->
-        <!-- Upload plan -->
-        <div id="plan-upload-area" style="border:2px dashed var(--border);border-radius:16px;padding:28px;text-align:center;margin-bottom:28px;cursor:pointer;transition:border-color 0.2s"
-             onclick="document.getElementById('plan-file-input').click()"
-             ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
-             ondragleave="this.style.borderColor='var(--border)'"
-             ondrop="handlePlanDrop(event)">
-          <div style="font-size:36px;margin-bottom:8px">📐</div>
-          <div style="font-size:15px;font-weight:600;margin-bottom:4px">Sube tu plano arquitectónico</div>
-          <div style="font-size:13px;color:var(--muted)">La AI analizará las unidades, áreas y distribución. Luego podrás pedir modificaciones.</div>
-          <input type="file" id="plan-file-input" accept="image/*" style="display:none" onchange="handlePlanUpload(event)">
+
+        <!-- Plan Wizard -->
+        <div id="plan-wizard">
+          <!-- Step 1: Upload -->
+          <div id="pw-step-upload" class="sw-section" style="margin-bottom:16px">
+            <h3 style="color:var(--gold);font-size:15px;margin-bottom:10px">📐 Paso 1: Sube tu plano</h3>
+            <div id="plan-upload-area" style="border:2px dashed var(--border);border-radius:16px;padding:28px;text-align:center;cursor:pointer;transition:border-color 0.2s"
+                 onclick="document.getElementById('plan-file-input').click()"
+                 ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
+                 ondragleave="this.style.borderColor='var(--border)'"
+                 ondrop="handlePlanDrop(event)">
+              <div style="font-size:36px;margin-bottom:8px">📐</div>
+              <div style="font-size:15px;font-weight:600;margin-bottom:4px">Arrastra tu plano aquí o haz click</div>
+              <div style="font-size:13px;color:var(--muted)">JPG, PNG o PDF — El sistema lo analizará con AI arquitectónica</div>
+              <input type="file" id="plan-file-input" accept="image/*,.pdf" style="display:none" onchange="handlePlanUpload(event)">
+            </div>
+          </div>
+
+          <!-- Step 2: Technical context (hidden until plan uploaded) -->
+          <div id="pw-step-context" class="sw-section" style="display:none;margin-bottom:16px">
+            <h3 style="color:var(--gold);font-size:15px;margin-bottom:10px">🏗️ Paso 2: Datos técnicos del proyecto</h3>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Estos datos permiten un análisis más preciso. Si no sabes algo, déjalo en blanco.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Tipo de proyecto</label>
+                <select id="pw-project-type" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:12px">
+                  <option value="residencial-multifamiliar">Residencial Multifamiliar</option>
+                  <option value="residencial-villas">Villas / Casas Individuales</option>
+                  <option value="townhouse">Townhouses / Adosados</option>
+                  <option value="mixto">Uso Mixto (Comercial + Residencial)</option>
+                  <option value="hotel">Hotel / Resort</option>
+                  <option value="comercial">Comercial / Oficinas</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Etapa del proyecto</label>
+                <select id="pw-stage" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:12px">
+                  <option value="anteproyecto">Anteproyecto / Conceptual</option>
+                  <option value="preliminar">Diseño Preliminar</option>
+                  <option value="ejecutivo" selected>Proyecto Ejecutivo</option>
+                  <option value="construccion">En Construcción</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Niveles / Pisos</label>
+                <select id="pw-levels" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:12px">
+                  <option value="1">1 nivel</option><option value="2" selected>2 niveles</option><option value="3">3 niveles</option><option value="4">4 niveles</option><option value="5+">5+ niveles</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Sistema constructivo</label>
+                <select id="pw-structure" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:12px">
+                  <option value="hormigon">Hormigón Armado</option><option value="acero">Estructura Metálica</option><option value="mamposteria">Mampostería Confinada</option><option value="madera">Madera</option><option value="mixto">Mixto</option><option value="no-se">No estoy seguro</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Terreno total (m²)</label>
+                <input id="pw-land-area" type="text" placeholder="Ej: 2500" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:12px">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Zona sísmica</label>
+                <select id="pw-seismic" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:12px">
+                  <option value="alta">Alta (Caribe, Pacífico)</option><option value="media">Media</option><option value="baja">Baja</option><option value="no-se">No estoy seguro</option>
+                </select>
+              </div>
+            </div>
+            <div style="margin-top:10px">
+              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">¿Qué quieres que la AI analice? <span style="color:var(--gold)">Selecciona todo lo que aplique</span></label>
+              <div style="display:flex;flex-wrap:wrap;gap:6px" id="pw-priorities">
+                <label class="pw-chip pw-chip-on" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" checked value="distribucion" style="display:none">📐 Distribución y áreas</label>
+                <label class="pw-chip pw-chip-on" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" checked value="estructura" style="display:none">🏗️ Estructura y columnas</label>
+                <label class="pw-chip pw-chip-on" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" checked value="medidas" style="display:none">📏 Medidas y m²</label>
+                <label class="pw-chip" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" value="instalaciones" style="display:none">⚡ Inst. eléctricas/sanitarias</label>
+                <label class="pw-chip" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" value="normativa" style="display:none">📋 Cumplimiento normativa</label>
+                <label class="pw-chip" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" value="costos" style="display:none">💰 Estimación de costos</label>
+                <label class="pw-chip" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" value="circulacion" style="display:none">🚶 Flujo de circulación</label>
+                <label class="pw-chip" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" value="sostenibilidad" style="display:none">🌿 Sostenibilidad</label>
+                <label class="pw-chip" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" value="ventilacion" style="display:none">💨 Ventilación e iluminación natural</label>
+                <label class="pw-chip" onclick="this.classList.toggle('pw-chip-on')"><input type="checkbox" value="accesibilidad" style="display:none">♿ Accesibilidad universal</label>
+              </div>
+            </div>
+            <div style="margin-top:10px">
+              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Notas adicionales <span style="opacity:0.5">opcional</span></label>
+              <textarea id="pw-notes" placeholder="Ej: La unidad E-6 será un penthouse, queremos maximizar vista al mar, necesitamos cumplir código R-001 de RD..." style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:12px;min-height:50px;resize:vertical"></textarea>
+            </div>
+            <button onclick="launchPlanAnalysis()" style="margin-top:14px;width:100%;background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">🔍 Analizar Plano con AI Arquitectónica</button>
+          </div>
         </div>
 
         <!-- Plan analysis + chat area -->
@@ -1324,6 +1399,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .sw-card-desc{padding:0 10px 8px;font-size:10px;color:var(--muted);line-height:1.3}
 .sw-color-strip{display:flex;height:40px;border-radius:6px;overflow:hidden;margin-bottom:4px}
 .sw-color-strip div{flex:1}
+.pw-chip{font-size:12px;padding:6px 12px;background:var(--card);border:1px solid var(--border);border-radius:20px;cursor:pointer;transition:all 0.2s;color:var(--muted)}
+.pw-chip-on{background:rgba(196,119,59,0.15)!important;border-color:var(--gold)!important;color:var(--gold)!important}
 </style>
 
 <!-- SWARM DASHBOARD OVERLAY -->
@@ -4663,11 +4740,9 @@ async function processUploadedPlan(file) {
     const src = e.target.result;
     state.__currentPlanSrc = src;
 
-    // Show workspace
-    document.getElementById('plan-upload-area').style.display = 'none';
-    document.getElementById('plan-workspace').style.display = '';
-    document.getElementById('plan-original-img').src = src;
-    document.getElementById('plan-chat').innerHTML = '';
+    // Show step 2 of wizard (technical context) instead of jumping to analysis
+    document.getElementById('pw-step-upload').innerHTML = `<div style="display:flex;gap:12px;align-items:center;padding:8px"><img src="${src}" style="height:80px;border-radius:8px;border:1px solid var(--border)"><div><div style="font-weight:600;font-size:14px">${file.name}</div><div style="font-size:12px;color:var(--gold)">✅ Plano cargado — completa los datos técnicos abajo</div></div></div>`;
+    document.getElementById('pw-step-context').style.display = '';
 
     // Also save to FLOOR_PLANS
     const key = 'uploaded_' + Date.now();
@@ -4724,6 +4799,110 @@ Responde en español. Sé específico con nombres/códigos de unidades visibles.
   reader.readAsDataURL(file);
 }
 
+async function launchPlanAnalysis() {
+  const src = state.__currentPlanSrc;
+  if (!src) { showToast('⚠️ Sube un plano primero'); return; }
+
+  // Gather wizard data
+  const projectType = document.getElementById('pw-project-type')?.value || '';
+  const stage = document.getElementById('pw-stage')?.value || '';
+  const levels = document.getElementById('pw-levels')?.value || '';
+  const structure = document.getElementById('pw-structure')?.value || '';
+  const landArea = document.getElementById('pw-land-area')?.value?.trim() || '';
+  const seismic = document.getElementById('pw-seismic')?.value || '';
+  const notes = document.getElementById('pw-notes')?.value?.trim() || '';
+
+  // Get selected priorities
+  const priorities = [];
+  document.querySelectorAll('#pw-priorities input[type=checkbox]').forEach(cb => {
+    if (cb.closest('.pw-chip-on')) priorities.push(cb.value);
+  });
+
+  // Hide wizard, show workspace
+  document.getElementById('plan-wizard').style.display = 'none';
+  document.getElementById('plan-workspace').style.display = '';
+  document.getElementById('plan-original-img').src = src;
+  document.getElementById('plan-chat').innerHTML = '';
+
+  // Save to FLOOR_PLANS
+  const key = 'uploaded_' + Date.now();
+  FLOOR_PLANS[key] = { src, label: 'Plano Principal' };
+  buildFloorPlans();
+
+  // Build expert analysis prompt
+  let analysisPrompt = `Eres un arquitecto, ingeniero civil y diseñador experto con 20+ años de experiencia. Analiza este plano arquitectónico con precisión profesional.
+
+DATOS DEL PROYECTO:
+- Tipo: ${projectType}
+- Etapa: ${stage}
+- Niveles: ${levels}
+- Sistema constructivo: ${structure}
+${landArea ? `- Terreno: ${landArea} m²` : ''}
+- Zona sísmica: ${seismic}
+${notes ? `- Notas del cliente: ${notes}` : ''}
+
+ANALIZA EN DETALLE:`;
+
+  if (priorities.includes('distribucion')) analysisPrompt += `
+📐 DISTRIBUCIÓN: Identifica cada unidad/espacio con su código. Lista habitaciones, baños, áreas de cada una. Evalúa si la distribución es eficiente.`;
+  if (priorities.includes('estructura')) analysisPrompt += `
+🏗️ ESTRUCTURA: Identifica ejes estructurales, ubicación probable de columnas, vigas, muros de carga. Evalúa si el sistema ${structure} es adecuado. Señala posibles problemas de rigidez o luces excesivas.`;
+  if (priorities.includes('medidas')) analysisPrompt += `
+📏 MEDIDAS: Lee todas las cotas/medidas visibles. Calcula m² de cada unidad y áreas comunes. Indica si los espacios cumplen mínimos habitables.`;
+  if (priorities.includes('instalaciones')) analysisPrompt += `
+⚡ INSTALACIONES: Analiza ubicación probable de ductos, bajantes, tableros eléctricos. Señala si hay concentraciones que faciliten o compliquen las instalaciones.`;
+  if (priorities.includes('normativa')) analysisPrompt += `
+📋 NORMATIVA: Verifica retiros, índice de ocupación, estacionamientos, salidas de emergencia, ancho de pasillos vs normativa.`;
+  if (priorities.includes('costos')) analysisPrompt += `
+💰 COSTOS: Estima costo por m² según tipo y acabados. Da rango de costo total del proyecto.`;
+  if (priorities.includes('circulacion')) analysisPrompt += `
+🚶 CIRCULACIÓN: Evalúa flujos peatonales, accesos vehiculares, puntos de congestión, escaleras, rampas.`;
+  if (priorities.includes('sostenibilidad')) analysisPrompt += `
+🌿 SOSTENIBILIDAD: Orientación solar, ventilación cruzada, posibilidad de paneles solares, captación de agua.`;
+  if (priorities.includes('ventilacion')) analysisPrompt += `
+💨 VENTILACIÓN E ILUMINACIÓN: Analiza ventilación cruzada, iluminación natural, unidades sin ventanas, espacios ciegos.`;
+  if (priorities.includes('accesibilidad')) analysisPrompt += `
+♿ ACCESIBILIDAD: Evalúa rampas, anchos de puerta, baños accesibles, ascensor si aplica.`;
+
+  analysisPrompt += `
+
+Responde en español. Usa formato con encabezados y listas. Sé específico con nombres de unidades visibles en el plano (E-1, E-2, etc.). Da recomendaciones concretas de mejora.`;
+
+  // Store for follow-up chat
+  state.__planWizardContext = { projectType, stage, levels, structure, landArea, seismic, notes, priorities };
+
+  const analysisDiv = document.getElementById('plan-analysis');
+  analysisDiv.innerHTML = '<div style="text-align:center;padding:30px"><div class="spinner"></div><div style="margin-top:10px;color:var(--muted)">Analizando plano con AI arquitectónica...<br><small>Esto puede tardar 30-60 segundos</small></div></div>';
+
+  try {
+    const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
+
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST', signal: AbortSignal.timeout(90000),
+      headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+      body: JSON.stringify({
+        model: visionModel,
+        messages: [{ role: 'user', content: [
+          { type: 'image_url', image_url: { url: src } },
+          { type: 'text', text: analysisPrompt }
+        ]}]
+      })
+    });
+
+    if (resp.ok) {
+      const d = await resp.json();
+      const text = d.choices?.[0]?.message?.content || 'No se pudo analizar';
+      analysisDiv.innerHTML = `<div style="font-size:12px;color:var(--gold);margin-bottom:8px;font-weight:600">📋 Análisis Profesional</div><div style="white-space:pre-wrap;line-height:1.6;font-size:13px">${text.replace(/\*\*(.*?)\*\*/g, '<strong style="color:var(--gold)">$1</strong>').replace(/\n/g, '<br>')}</div>`;
+      state.__planAnalysis = text;
+      addPlanChat('ai', '✅ Análisis completado. Puedes pedirme modificaciones, cálculos adicionales, o generar renders 3D de áreas específicas.');
+    } else {
+      analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">❌ Error: HTTP ${resp.status}. Intenta de nuevo.</div>`;
+    }
+  } catch(e) {
+    analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">❌ ${e.message}</div>`;
+  }
+}
+
 function addPlanChat(role, text) {
   const chat = document.getElementById('plan-chat');
   const isAi = role === 'ai';
@@ -4747,7 +4926,10 @@ async function sendPlanModification() {
     const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
 
     const messages = [
-      { role: 'system', content: `Eres un arquitecto e ingeniero civil experto. Estás analizando un plano arquitectónico. Análisis previo del plano: ${prevAnalysis.slice(0, 2000)}. Responde en español. Sé técnico y preciso.` }
+      { role: 'system', content: `Eres un arquitecto, ingeniero civil y diseñador experto con 20+ años de experiencia. Estás analizando un plano arquitectónico.
+${state.__planWizardContext ? `PROYECTO: tipo=${state.__planWizardContext.projectType}, etapa=${state.__planWizardContext.stage}, niveles=${state.__planWizardContext.levels}, estructura=${state.__planWizardContext.structure}, terreno=${state.__planWizardContext.landArea || '?'}m², zona sísmica=${state.__planWizardContext.seismic}` : ''}
+ANÁLISIS PREVIO: ${prevAnalysis.slice(0, 2000)}
+Responde en español. Sé técnico, preciso y profesional. Cuando sugieras modificaciones, explica el impacto estructural, de costos y de normativa.` }
     ];
 
     // Include the plan image if available
