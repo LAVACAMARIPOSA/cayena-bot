@@ -2278,9 +2278,22 @@ function buildGallery() {
     const media = item.type === 'video'
       ? `<video src="${item.src}" muted loop autoplay playsinline style="width:100%;height:100%;object-fit:cover"></video><div style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700">▶ VIDEO</div>`
       : `<img src="${item.src}" alt="${item.label}" loading="lazy">`;
-    return `<div class="gallery-item" onclick="openLightbox(${i})">${media}<div class="gallery-item-overlay"><span class="gallery-item-label">${item.label}</span></div></div>`;
+    return `<div class="gallery-item">
+      <div onclick="openLightbox(${i})">${media}</div>
+      <div class="gallery-item-overlay">
+        <span class="gallery-item-label">${item.label}</span>
+        <button onclick="event.stopPropagation();downloadSingleRender('${k}')" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.7);color:#fff;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;backdrop-filter:blur(4px)">⬇</button>
+      </div>
+    </div>`;
   }).join('');
   state.lightboxItems = keys;
+
+  // Add "Download All" button if there are images
+  if (keys.length > 1) {
+    grid.insertAdjacentHTML('beforeend', `<div style="grid-column:1/-1;text-align:center;padding:16px">
+      <button onclick="downloadAllRenders()" style="background:linear-gradient(135deg,#c4773b,#a85f2a);color:#fff;border:none;border-radius:10px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer">⬇️ Descargar todas las imágenes (${keys.length})</button>
+    </div>`);
+  }
 }
 
 function openLightbox(idx) {
@@ -2300,7 +2313,7 @@ function updateLightbox() {
   } else {
     wrap.innerHTML = `<img id="lightbox-img" src="${item.src}" alt="${item.label}" style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px">`;
   }
-  document.getElementById('lightbox-label').textContent = item.label;
+  document.getElementById('lightbox-label').innerHTML = `${item.label} <button onclick="downloadSingleRender('${k}')" style="background:rgba(196,119,59,0.9);color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;margin-left:8px;vertical-align:middle">⬇ Descargar</button>`;
 }
 function lightboxPrev() {
   state.lightboxIdx = (state.lightboxIdx - 1 + state.lightboxItems.length) % state.lightboxItems.length;
@@ -2309,6 +2322,61 @@ function lightboxPrev() {
 function lightboxNext() {
   state.lightboxIdx = (state.lightboxIdx + 1) % state.lightboxItems.length;
   updateLightbox();
+}
+
+function downloadSingleRender(key) {
+  const item = IMG[key];
+  if (!item) return;
+  const a = document.createElement('a');
+  a.href = item.src;
+  a.download = `cayena-${item.label.replace(/[^a-zA-Z0-9áéíóúñ ]/gi, '').replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.png`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+async function downloadAllRenders() {
+  const keys = Object.keys(IMG);
+  if (keys.length === 0) { showToast('⚠️ No hay imágenes'); return; }
+
+  showToast('⬇️ Preparando descarga...');
+
+  // If only a few images, download individually
+  if (keys.length <= 3) {
+    keys.forEach(k => downloadSingleRender(k));
+    return;
+  }
+
+  // For many images, create a simple HTML gallery file they can open
+  let htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${state.projectName || 'CayenaBot'} - Renders</title>
+<style>body{margin:0;background:#1a1a2e;color:#fff;font-family:system-ui}h1{text-align:center;padding:20px;color:#c4773b}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:12px;padding:20px}
+.item{position:relative;border-radius:12px;overflow:hidden}
+.item img{width:100%;display:block;cursor:pointer}
+.item img:hover{opacity:0.9}
+.label{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.8));color:#fff;padding:20px 12px 10px;font-size:13px;font-weight:600}
+a.dl{position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.7);color:#fff;padding:6px 10px;border-radius:6px;text-decoration:none;font-size:12px}
+</style></head><body>
+<h1>🏗️ ${state.projectName || 'CayenaBot'} — ${keys.length} Renders</h1>
+<p style="text-align:center;color:#888;margin-top:-10px">${state.projectLocation || ''} · Generado por CayenaBot</p>
+<div class="grid">`;
+
+  keys.forEach((k, i) => {
+    const item = IMG[k];
+    if (item.type === 'video') return;
+    const fname = `render-${i+1}-${item.label.replace(/[^a-zA-Z0-9]/gi, '-').toLowerCase()}.png`;
+    htmlContent += `<div class="item"><img src="${item.src}" alt="${item.label}"><div class="label">${i+1}. ${item.label}</div><a class="dl" href="${item.src}" download="${fname}">⬇</a></div>\n`;
+  });
+
+  htmlContent += `</div>
+<p style="text-align:center;color:#555;padding:20px;font-size:12px">Haz clic en ⬇ en cada imagen para descargarla, o clic derecho → Guardar imagen</p>
+</body></html>`;
+
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${(state.projectName || 'cayenabot-renders').replace(/\s+/g, '-').toLowerCase()}-renders.html`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+  showToast(`✅ Galería descargada (${keys.length} renders) — ábrela en tu navegador`);
 }
 document.addEventListener('keydown', e => {
   if (!document.getElementById('lightbox').classList.contains('open')) return;
@@ -2778,11 +2846,13 @@ async function generateImage(prompt, opts = {}) {
           'Client-Agent': 'CayenaBot:1.0:cayenabot'
         },
         body: JSON.stringify({
-          prompt: `photorealistic architectural render, ${prompt}, high quality, professional photography, 8k`,
-          params: { width: 512, height: 512, steps: 25, sampler_name: 'k_euler_a', cfg_scale: 7, n: 1 },
-          models: ['Deliberate'],
-          nsfw: false,
-          r2: true
+          prompt: `photorealistic architectural render, luxury real estate, ${prompt}, high quality, professional real estate photography, 8k, no people, no text, no watermark ###  blurry, cartoon, anime, sketch, low quality, nsfw, nude, person`,
+          params: { width: 768, height: 512, steps: 25, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
+          models: ['AlbedoBase XL (SDXL)', 'SDXL 1.0', 'Deliberate', 'stable_diffusion'],
+          nsfw: true,
+          censor_nsfw: false,
+          r2: true,
+          replacement_filter: true
         })
       });
       if (hordeSubmit.ok) {
@@ -3526,8 +3596,10 @@ async function runSwarm(projectInfo) {
     document.getElementById('swarm-time').textContent = elapsed + 's';
   }, 100);
 
-  swarmLog('Coordinator', '🚀 Inicializando Ruflo Swarm con ' + tasks.length + ' agentes...');
-  swarmLog('Coordinator', '📡 Renders via Pollinations.ai FLUX — rate-limit aware, backoff automático');
+  // Generate a shared style seed for visual consistency across all renders
+  state.__styleSeed = String(Math.floor(Math.random() * 999999999));
+  swarmLog('Coordinator', `🚀 Inicializando Ruflo Swarm — ${tasks.length} agentes, seed: ${state.__styleSeed}`);
+  swarmLog('Coordinator', '🎨 Estilo visual unificado para coherencia entre renders');
 
   // Separate render and non-render agents
   const renderAgents = swarmState.agents.filter(a => a.taskFn === 'render');
@@ -3540,15 +3612,18 @@ async function runSwarm(projectInfo) {
     await Promise.allSettled(batch.map(agent => executeAgent(agent)));
   }
 
-  // Phase 2: Run render agents ONE at a time with delays (free API rate limits)
-  swarmLog('Coordinator', `🎨 Fase 2: ${renderAgents.length} renders (1 a la vez, con pausa entre cada uno)`);
-  for (let i = 0; i < renderAgents.length; i++) {
-    const agent = renderAgents[i];
-    swarmLog('Coordinator', `🎨 Render ${i+1}/${renderAgents.length}: ${agent.task}`);
-    await executeAgent(agent);
-    // Pause between renders to respect free tier rate limits (20 req/min)
-    if (i < renderAgents.length - 1) {
-      await new Promise(r => setTimeout(r, 4000 + Math.random() * 2000));
+  // Phase 2: Run render agents in batches of 3 (balance speed vs rate limits)
+  const RENDER_BATCH = 3;
+  swarmLog('Coordinator', `🎨 Fase 2: ${renderAgents.length} renders (${RENDER_BATCH} simultáneos)`);
+  for (let i = 0; i < renderAgents.length; i += RENDER_BATCH) {
+    const batch = renderAgents.slice(i, i + RENDER_BATCH);
+    const batchNum = Math.floor(i / RENDER_BATCH) + 1;
+    const totalBatches = Math.ceil(renderAgents.length / RENDER_BATCH);
+    swarmLog('Coordinator', `🎨 Lote ${batchNum}/${totalBatches}: ${batch.map(a => a.task).join(', ')}`);
+    await Promise.allSettled(batch.map(agent => executeAgent(agent)));
+    // Pause between batches
+    if (i + RENDER_BATCH < renderAgents.length) {
+      await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
     }
   }
 
@@ -3920,7 +3995,7 @@ async function diagRenders() {
       const submitResp = await fetch('https://aihorde.net/api/v2/generate/async', {
         method: 'POST', signal: AbortSignal.timeout(10000),
         headers: { 'Content-Type': 'application/json', 'apikey': '0000000000', 'Client-Agent': 'CayenaBot:1.0:cayenabot' },
-        body: JSON.stringify({ prompt: 'photorealistic modern house, ' + testPrompt, params: { width: 512, height: 512, steps: 20, sampler_name: 'k_euler_a', cfg_scale: 7, n: 1 }, models: ['Deliberate'], nsfw: false, r2: true })
+        body: JSON.stringify({ prompt: 'photorealistic modern house, luxury real estate, ' + testPrompt + ', professional photography ### blurry, cartoon, anime, nsfw, nude, person', params: { width: 768, height: 512, steps: 20, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1 }, models: ['AlbedoBase XL (SDXL)', 'SDXL 1.0', 'Deliberate', 'stable_diffusion'], nsfw: true, censor_nsfw: false, r2: true, replacement_filter: true })
       });
       if (!submitResp.ok) throw new Error(`HTTP ${submitResp.status}: ${await submitResp.text().catch(()=>'')}`);
       const { id } = await submitResp.json();
@@ -4193,7 +4268,16 @@ function loadProject() {
 }
 
 function exportProject() {
-  const project = { name: state.projectName || 'Mi Proyecto', location: state.projectLocation || '', images: IMG, scenes: SCENES, units: UNITS, floorPlans: FLOOR_PLANS, chatHistory: state.chatHistory.slice(-50), exportedAt: new Date().toISOString() };
+  const project = {
+    name: state.projectName || document.getElementById('b-name')?.value?.trim() || 'Mi Proyecto',
+    location: state.projectLocation || document.getElementById('b-location')?.value?.trim() || '',
+    locationContext: document.getElementById('b-location-context')?.value?.trim() || '',
+    description: document.getElementById('b-description')?.value?.trim() || '',
+    images: IMG, scenes: SCENES, units: UNITS, floorPlans: FLOOR_PLANS,
+    chatHistory: state.chatHistory.slice(-50),
+    exportedAt: new Date().toISOString(),
+    version: 2
+  };
   const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = (state.projectName || 'cayenabot-project').replace(/\s+/g, '-').toLowerCase() + '.json';
@@ -4207,12 +4291,38 @@ function importProject(file) {
       const p = JSON.parse(e.target.result); newProject(true);
       if (p.images) Object.assign(IMG, p.images);
       if (p.scenes) Object.assign(SCENES, p.scenes);
-      if (p.units) UNITS.push(...p.units);
+      if (p.units) { if (Array.isArray(p.units)) UNITS.push(...p.units); }
       if (p.floorPlans) Object.assign(FLOOR_PLANS, p.floorPlans);
       state.projectName = p.name || ''; state.projectLocation = p.location || '';
-      const first = Object.keys(SCENES)[0]; if (first) state.currentScene = first;
+
+      // Populate builder fields if they exist
+      const bName = document.getElementById('b-name');
+      const bLoc = document.getElementById('b-location');
+      const bDesc = document.getElementById('b-description');
+      const bLocCtx = document.getElementById('b-location-context');
+      if (bName) bName.value = p.name || '';
+      if (bLoc) bLoc.value = p.location || '';
+      if (bDesc && p.description) bDesc.value = p.description;
+      if (bLocCtx && p.locationContext) bLocCtx.value = p.locationContext;
+
+      // Set first scene and init tour
+      const first = Object.keys(SCENES)[0];
+      if (first) {
+        state.currentScene = first;
+        if (window.__tourInited) {
+          goToScene(first, false);
+        }
+      }
+
       buildGallery(); buildUnits(); updateMinimap(); buildFloorPlans();
-      showToast('📂 Proyecto importado: ' + (p.name || ''));
+      if (typeof initTourEngine === 'function' && Object.keys(SCENES).length > 0) {
+        window.__tourInited = false;
+        setTimeout(() => initTourEngine(), 500);
+      }
+
+      const imgCount = Object.keys(IMG).length;
+      const sceneCount = Object.keys(SCENES).length;
+      showToast(`📂 Importado: ${p.name || 'Proyecto'} — ${imgCount} imágenes, ${sceneCount} escenas`);
     } catch(err) { showToast('⚠️ Error: ' + err.message); }
   };
   reader.readAsText(file);
