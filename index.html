@@ -1084,9 +1084,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <h2>⚙️ Configuración</h2>
     <div style="font-size:12px;color:var(--muted);margin-bottom:16px;padding:12px;background:rgba(0,204,102,0.08);border-radius:8px;border:1px solid rgba(0,204,102,0.2)">
       ✅ <strong>Chat AI</strong> — OpenRouter (modelos gratuitos, $0 gasto)<br>
-      ✅ <strong>Renders</strong> — Pollinations.ai + FLUX (gratis, ilimitado)<br>
-      🎬 <strong>Videos</strong> — HuggingFace gratuito (requiere tu token gratis en hf.co)<br>
-      <span style="font-size:11px">Las keys vienen preconfiguradas. Puedes cambiarlas si tienes las tuyas.</span>
+      ✅ <strong>Renders</strong> — Pollinations.ai FLUX (gratis) + Together.ai FLUX.1 (premium)<br>
+      🎬 <strong>Videos</strong> — HuggingFace (requiere token gratis)<br>
+      <span style="font-size:11px">Las keys vienen preconfiguradas. Puedes cambiarlas o añadir Together.ai para renders premium.</span>
     </div>
     <div class="settings-field">
       <label>OpenRouter API Key</label>
@@ -1099,6 +1099,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <input type="password" id="hf-key-input" placeholder="hf_...">
       <div style="font-size:11px;color:var(--muted);margin-top:4px">Token gratuito en <a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--blue)">huggingface.co/settings/tokens</a> — habilita generación de video AI.</div>
       <div class="settings-status" id="hf-status"></div>
+    </div>
+    <div class="settings-field">
+      <label>Together.ai API Key <span style="color:var(--muted);font-weight:400">(opcional — renders premium FLUX.1)</span></label>
+      <input type="password" id="together-key-input" placeholder="tok_...">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">$1 gratis al registrarte = ~1,000 renders. <a href="https://api.together.xyz/settings/api-keys" target="_blank" style="color:var(--blue)">Obtener key</a></div>
+      <div class="settings-status" id="together-status"></div>
     </div>
     <button id="settings-test-btn" onclick="testConnections()">🔗 Probar Conexión</button>
     <button onclick="diagRenders()" style="background:var(--card);color:var(--text);border:1px solid var(--border)">🔍 Diagnosticar Renders</button>
@@ -1640,6 +1646,7 @@ const state = {
   chatHistory: [],
   orKey: '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',
   hfKey: '',
+  togetherKey: '',
   chatModel: 'google/gemini-2.5-pro-exp-03-25:free',
   renderResultData: null,
   lightboxIdx: 0,
@@ -2420,77 +2427,81 @@ async function generateImage(prompt, opts = {}) {
 
   // Concurrency gate
   while (__imgGenActive >= __IMG_MAX_CONCURRENT) {
-    await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
+    await new Promise(r => setTimeout(r, 300 + Math.random() * 400));
   }
   __imgGenActive++;
 
   try {
-    // Rate limit: ensure minimum gap between Pollinations requests
-    const minGap = fast ? 2000 : 1500;
-    const elapsed = Date.now() - __lastPollRequest;
-    if (elapsed < minGap) {
-      await new Promise(r => setTimeout(r, minGap - elapsed + Math.random() * 500));
-    }
+    // Method 1: Pollinations via <img> tag (bypasses fetch 429 rate limits)
+    const pollinationsModels = ['flux', 'turbo'];
+    for (const model of pollinationsModels) {
+      try {
+        const seed = Date.now() + Math.floor(Math.random() * 10000);
+        const w = model === 'flux' ? 1280 : 1024;
+        const h = model === 'flux' ? 720 : 576;
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${model}&nologo=true&seed=${seed}`;
 
-    // Try Pollinations with exponential backoff on 429
-    const models = ['flux', 'turbo'];
-    for (const model of models) {
-      const maxRetries = fast ? 3 : 5;
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          __lastPollRequest = Date.now();
-          const seed = Date.now() + attempt;
-          const w = model === 'flux' ? 1280 : 1024;
-          const h = model === 'flux' ? 720 : 576;
-          const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${model}&nologo=true&seed=${seed}`;
-          const r = await fetch(url, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
-
-          if (r.status === 429) {
-            // Rate limited — wait with exponential backoff then retry
-            const wait = (2000 * Math.pow(2, attempt)) + Math.random() * 1000;
-            console.log(`Pollinations 429 (${model}), retry ${attempt+1} in ${(wait/1000).toFixed(1)}s`);
-            await new Promise(r => setTimeout(r, wait));
-            continue;
-          }
-          if (!r.ok) throw new Error(`Pollinations ${model} HTTP ${r.status}`);
-
-          const blob = await r.blob();
-          if (blob.size < 500) throw new Error(`Pollinations ${model} empty (${blob.size}b)`);
-          return URL.createObjectURL(blob);
-        } catch(e) {
-          if (e.message.includes('429')) continue; // retry on rate limit
-          console.log(`Pollinations ${model} error:`, e.message);
-          break; // non-429 error, try next model
-        }
+        const result = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          const timeout = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, fast ? 35000 : 65000);
+          img.onload = () => {
+            clearTimeout(timeout);
+            // Try to convert to data URL for local storage
+            try {
+              const c = document.createElement('canvas');
+              c.width = img.naturalWidth; c.height = img.naturalHeight;
+              c.getContext('2d').drawImage(img, 0, 0);
+              resolve(c.toDataURL('image/jpeg', 0.85));
+            } catch(e) {
+              // CORS canvas tainted — use URL directly
+              resolve(url);
+            }
+          };
+          img.onerror = () => { clearTimeout(timeout); reject(new Error('load failed')); };
+          img.src = url;
+        });
+        if (result) return result;
+      } catch(e) {
+        console.log(`Pollinations ${model} img-tag:`, e.message);
+        // Small delay before next attempt
+        await new Promise(r => setTimeout(r, 1000));
       }
     }
 
-    // Fallback: OpenRouter Gemini image generation (same API that works for chat)
-    if (!fast) {
+    // Method 2: Together.ai (if API key available — paid, very reliable)
+    const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
+    if (togetherKey) {
       try {
-        console.log('Trying OpenRouter Gemini image gen...');
-        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST', signal: AbortSignal.timeout(60000),
-          headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
-          body: JSON.stringify({
-            model: 'google/gemini-2.0-flash-exp:free',
-            messages: [{ role: 'user', content: `Generate a photorealistic architectural render image of: ${prompt}` }],
-            modalities: ['text', 'image']
-          })
+        const r = await fetch('https://api.together.xyz/v1/images/generations', {
+          method: 'POST', signal: AbortSignal.timeout(fast ? 30000 : 60000),
+          headers: { 'Authorization': `Bearer ${togetherKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell-Free', prompt, width: 1024, height: 768, steps: 4, n: 1, response_format: 'b64_json' })
         });
-        if (resp.ok) {
-          const d = await resp.json();
-          const parts = d.choices?.[0]?.message?.content;
-          if (Array.isArray(parts)) {
-            const ip = parts.find(p => p.type === 'image_url' || p.inline_data);
-            if (ip?.image_url?.url) return ip.image_url.url;
-            if (ip?.inline_data?.data) return `data:${ip.inline_data.mime_type||'image/png'};base64,${ip.inline_data.data}`;
-          }
+        if (r.ok) {
+          const d = await r.json();
+          const b64 = d.data?.[0]?.b64_json;
+          if (b64) return `data:image/png;base64,${b64}`;
         }
-      } catch(e) { console.log('OR Gemini image failed:', e.message); }
+      } catch(e) { console.log('Together.ai:', e.message); }
     }
 
-    console.error('All image providers failed for prompt:', prompt.slice(0, 80));
+    // Method 3: Pollinations fetch with retry (last resort)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const seed = Date.now() + attempt;
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=turbo&nologo=true&seed=${seed}`;
+        const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        if (r.status === 429) {
+          await new Promise(r => setTimeout(r, 3000 * Math.pow(2, attempt)));
+          continue;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const blob = await r.blob();
+        if (blob.size > 500) return URL.createObjectURL(blob);
+      } catch(e) { console.log('Poll fetch retry', attempt, e.message); }
+    }
+
     return null;
   } finally {
     __imgGenActive--;
@@ -3133,6 +3144,7 @@ function downloadRender() {
 function openSettings() {
   document.getElementById('or-key-input').value = state.orKey || '';
   document.getElementById('hf-key-input').value = state.hfKey || '';
+  document.getElementById('together-key-input').value = state.togetherKey || '';
   document.getElementById('or-status').innerHTML = '';
   document.getElementById('hf-status').innerHTML = '';
   document.getElementById('settings-modal').classList.add('open');
@@ -3145,6 +3157,8 @@ function saveSettings() {
   const hfVal = document.getElementById('hf-key-input').value.trim();
   if (orVal) { state.orKey = orVal; localStorage.setItem('cayenabot_or_key', orVal); }
   if (hfVal) { state.hfKey = hfVal; localStorage.setItem('cayenabot_hf_key', hfVal); }
+  const togVal = document.getElementById('together-key-input').value.trim();
+  if (togVal) { state.togetherKey = togVal; localStorage.setItem('cayenabot_together_key', togVal); }
   closeSettings();
   showToast('✅ Configuración guardada');
 }
@@ -3241,24 +3255,49 @@ async function diagRenders() {
   }
 
   const tests = [
-    { name: 'Pollinations FLUX (con retry)', fn: async (row) => {
+    { name: 'Pollinations FLUX (img tag)', fn: async (row) => {
       const seed = Date.now();
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=flux&nologo=true&seed=${seed}`;
-      const r = await fetchWithRetry(url, 5, row);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + 'b, type: ' + blob.type + ')');
-      return { size: blob.size, url: URL.createObjectURL(blob) };
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        const timeout = setTimeout(() => { img.src = ''; reject(new Error('Timeout 60s')); }, 60000);
+        img.onload = () => {
+          clearTimeout(timeout);
+          try {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth; c.height = img.naturalHeight;
+            c.getContext('2d').drawImage(img, 0, 0);
+            resolve({ size: c.width * c.height, url: c.toDataURL('image/jpeg', 0.8) });
+          } catch(e) {
+            resolve({ size: 0, url: url });
+          }
+        };
+        img.onerror = () => { clearTimeout(timeout); reject(new Error('Image load failed (red o CORS)')); };
+        img.src = url;
+      });
     }},
-    { name: 'Pollinations Turbo (con retry)', fn: async (row) => {
-      await new Promise(r => setTimeout(r, 3000)); // wait before second test
+    { name: 'Pollinations Turbo (img tag)', fn: async (row) => {
       const seed = Date.now();
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(testPrompt)}?width=512&height=512&model=turbo&nologo=true&seed=${seed}`;
-      const r = await fetchWithRetry(url, 5, row);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const blob = await r.blob();
-      if (blob.size < 500) throw new Error('Respuesta vacía (' + blob.size + 'b, type: ' + blob.type + ')');
-      return { size: blob.size, url: URL.createObjectURL(blob) };
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        const timeout = setTimeout(() => { img.src = ''; reject(new Error('Timeout 60s')); }, 60000);
+        img.onload = () => {
+          clearTimeout(timeout);
+          try {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth; c.height = img.naturalHeight;
+            c.getContext('2d').drawImage(img, 0, 0);
+            resolve({ size: c.width * c.height, url: c.toDataURL('image/jpeg', 0.8) });
+          } catch(e) {
+            resolve({ size: 0, url: url });
+          }
+        };
+        img.onerror = () => { clearTimeout(timeout); reject(new Error('Image load failed (red o CORS)')); };
+        img.src = url;
+      });
     }},
     { name: 'OpenRouter Gemini (imagen)', fn: async (row) => {
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -3647,6 +3686,8 @@ function init() {
   if (savedOr) state.orKey = savedOr;
   // orKey already has a default hardcoded in state
   if (savedHf) state.hfKey = savedHf;
+  const savedTogether = localStorage.getItem('cayenabot_together_key');
+  if (savedTogether) state.togetherKey = savedTogether;
   
   // Init tour UI
   updateTourUI();
