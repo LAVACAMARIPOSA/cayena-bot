@@ -620,16 +620,26 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 #pannellum-container{position:absolute;inset:0;z-index:1}
 #pannellum-container .pnlm-render-container{cursor:grab}
 #pannellum-container .pnlm-render-container:active{cursor:grabbing}
-/* Matterport-style hotspot */
+/* Matterport-style hotspot with walking pulse */
 .cayena-hotspot{
-  background:rgba(0,0,0,0.6)!important;border:2px solid rgba(255,255,255,0.8)!important;
-  border-radius:20px!important;padding:6px 14px!important;
-  color:#fff!important;font-size:12px!important;font-weight:600!important;
-  backdrop-filter:blur(8px);transition:all 0.3s!important;cursor:pointer!important;
-  box-shadow:0 2px 12px rgba(0,0,0,0.4)!important;
+  background:rgba(0,0,0,0.7)!important;border:2px solid rgba(255,255,255,0.9)!important;
+  border-radius:24px!important;padding:8px 18px!important;
+  color:#fff!important;font-size:13px!important;font-weight:700!important;
+  backdrop-filter:blur(10px);transition:all 0.3s!important;cursor:pointer!important;
+  box-shadow:0 4px 20px rgba(0,0,0,0.5),0 0 0 0 rgba(196,119,59,0.4)!important;
+  animation:hotspotPulse 2.5s ease-in-out infinite!important;
 }
-.cayena-hotspot:hover{background:rgba(196,119,59,0.8)!important;border-color:var(--gold)!important;transform:scale(1.1)}
-.cayena-hotspot .pnlm-pointer{border-bottom-color:rgba(0,0,0,0.6)!important}
+.cayena-hotspot::before{content:'🚶 ';font-size:14px}
+.cayena-hotspot:hover{
+  background:rgba(196,119,59,0.9)!important;border-color:var(--gold)!important;
+  transform:scale(1.15)!important;animation:none!important;
+  box-shadow:0 4px 30px rgba(196,119,59,0.6)!important;
+}
+.cayena-hotspot .pnlm-pointer{border-bottom-color:rgba(0,0,0,0.7)!important}
+@keyframes hotspotPulse{
+  0%,100%{box-shadow:0 4px 20px rgba(0,0,0,0.5),0 0 0 0 rgba(196,119,59,0.4)}
+  50%{box-shadow:0 4px 20px rgba(0,0,0,0.5),0 0 0 12px rgba(196,119,59,0)}
+}
 /* Hide default pannellum UI we don't need */
 .pnlm-about-msg,.pnlm-orientation-button,.pnlm-hot-spot-debug-indicator{display:none!important}
 .pnlm-load-box{background:rgba(0,0,0,0.8)!important;color:var(--gold)!important;border-radius:12px!important}
@@ -1174,6 +1184,11 @@ function deleteProject(idx) {
       <!-- Minimap dots -->
       <div id="minimap"></div>
 
+      <!-- Walk forward button (centered) -->
+      <div style="position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:25">
+        <button onclick="tourFlatNav(1)" id="tour-walk-btn" style="background:rgba(0,0,0,0.6);color:#fff;border:2px solid rgba(255,255,255,0.4);border-radius:50%;width:64px;height:64px;font-size:24px;cursor:pointer;backdrop-filter:blur(10px);transition:all 0.3s;display:none;box-shadow:0 4px 20px rgba(0,0,0,0.4)" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(196,119,59,0.7)';this.style.transform='scale(1.1)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.4)';this.style.background='rgba(0,0,0,0.6)';this.style.transform='scale(1)'">🚶</button>
+      </div>
+
       <!-- Matterport-style thumbnail strip -->
       <div id="tour-thumbstrip"></div>
 
@@ -1473,6 +1488,7 @@ function deleteProject(idx) {
       <button class="toolbar-btn" onclick="newProject()">🆕 Nuevo</button>
       <button class="toolbar-btn" onclick="saveProject()">💾 Guardar</button>
       <button class="toolbar-btn" onclick="exportProject()">⬇️ Exportar</button>
+      <button class="toolbar-btn" onclick="exportPDFBrochure()">📄 PDF</button>
       <button class="toolbar-btn" onclick="document.getElementById('import-input').click()">📂 Importar</button>
       <button class="toolbar-btn" onclick="document.getElementById('upload-input').click()">📎 Subir archivos</button>
       <button class="toolbar-btn" id="swarm-toggle-btn" onclick="toggleSwarmPanel()" style="display:none">⚡ Swarm</button>
@@ -2794,10 +2810,46 @@ Cuando generes renders, muestra también:
 - 3 variantes de estilo disponibles (ej: "minimalista luminoso", "cálido acogedor", "lujoso sofisticado")
 - Sugiere modificaciones que el usuario puede pedir
 
-PRECIOS ESTIMADOS DE MATERIALES (Caribe):
+PRECIOS DE MATERIALES DE CONSTRUCCIÓN RD (2024-2025):
 Porcelanato italiano: $45-65/m² | Mármol travertino: $80-120/m² | Deck teca: $90-150/m²
-Granito negro: $70-100/m² | Cuarzo Silestone: $120-200/m² | Vidrio templado: $85-130/m²
-Precio construcción Caribe: $800-1,400/m² (estándar), $1,400-2,500/m² (premium), $2,500-4,000/m² (lujo)
+Granito negro: $70-100/m² | Cuarzo Silestone: $120-200/m² | Vidrio templado 10mm: $85-130/m²
+Cemento gris (funda 42.5kg): RD$340-380 | Varilla 3/8": RD$35-45/pie | Block 6": RD$28-35/u
+Alambre dulce: RD$55-65/lb | Arena lavada: RD$1,200-1,600/m³ | Grava: RD$1,400-1,800/m³
+
+PRECIOS DE CONSTRUCCIÓN POR ZONA EN RD (USD/m²):
+Santo Domingo: $700-1,200 (estándar), $1,200-2,000 (premium), $2,000-3,500 (lujo)
+Punta Cana/Bávaro: $800-1,400 (estándar), $1,400-2,500 (premium), $2,500-4,500 (lujo)
+Cabarete/Sosúa: $750-1,300 (estándar), $1,300-2,200 (premium), $2,200-4,000 (lujo)
+Las Terrenas: $700-1,200 (estándar), $1,200-2,000 (premium), $2,000-3,800 (lujo)
+Santiago: $600-1,000 (estándar), $1,000-1,800 (premium), $1,800-3,000 (lujo)
+Cap Cana: $1,500-2,500 (premium), $2,500-5,000 (ultra lujo)
+
+PRECIOS DE VENTA INMOBILIARIA RD (USD/m²):
+Santo Domingo (Piantini/Naco): $1,800-3,500/m² | Ensanche Serralles: $1,500-2,800/m²
+Punta Cana beachfront: $3,000-6,000/m² | Punta Cana inland: $1,500-3,000/m²
+Cabarete beachfront: $2,500-4,500/m² | Sosúa: $1,200-2,500/m²
+Las Terrenas: $1,500-3,500/m² | Cap Cana: $4,000-10,000/m²
+Jarabacoa: $800-1,800/m² | Santiago centro: $1,000-2,000/m²
+
+ROI TÍPICO ALQUILER TURÍSTICO RD: 6-12% anual (Airbnb)
+ROI Punta Cana/Cabarete: 8-15% | Cap Cana: 5-8% | Santo Domingo: 6-10%
+
+NORMATIVA CONSTRUCCIÓN RD:
+- Código R-001: Reglamento de diseño y construcción
+- Ley 675 sobre condominios (propiedad horizontal)
+- DGII: Impuesto transferencia inmobiliaria 3%
+- Retiros mínimos: frontal 3-5m, lateral 2-3m (varía por municipio)
+- Altura máxima zona residencial: generalmente 4 pisos sin ascensor
+- Sismo: RD está en zona sísmica alta, diseño según ASCE 7 / ACI 318
+- Permisos: MOPC + Ayuntamiento local + Medio Ambiente (si aplica)
+
+ACABADOS POPULARES EN RD (marcas locales):
+Pisos: Cerámica León Jimenes, Porcelanato importado Italia/España
+Cocinas: Muebles Internacionales, Home Gallery
+Ventanas: Windoor, Tecnovent (aluminio anodizado)
+Sanitarios: Corona, Briggs, Kohler
+Grifería: Grohe, Moen, Delta
+Pintura: Popular, Sherwin-Williams, Lanco
 
 RUFLO SWARM ENGINE:
 Para generar un proyecto completo con 100 agentes AI en paralelo, el usuario dice "lanzar 100 agentes" o "generar proyecto completo".
@@ -2878,28 +2930,46 @@ function updateFlatTour() {
   const scene = SCENES[key];
   const imgSrc = IMG[scene.img]?.src || '';
 
-  // Update image with fade + Ken Burns cinematic effect
+  // Walking transition: dolly zoom + fade + Ken Burns
   const img = document.getElementById('tour-flat-img');
-  img.style.opacity = '0';
-  img.style.transition = 'opacity 0.5s ease';
-  // Stop any existing Ken Burns
-  img.style.animation = 'none';
+  const container = document.getElementById('tour-flat-pan');
+
+  // Phase 1: "Walk forward" zoom into current image
+  img.style.transition = 'transform 0.6s ease-in, opacity 0.4s ease, filter 0.4s ease';
+  img.style.transform = 'scale(1.8)';
+  img.style.filter = 'blur(4px)';
+  img.style.opacity = '0.3';
 
   setTimeout(() => {
+    // Phase 2: Swap image and "arrive" from zoomed in
+    img.style.transition = 'none';
     img.src = imgSrc;
-    img.style.opacity = '1';
-    // Start Ken Burns effect after image loads
-    img.onload = () => {
-      // Random Ken Burns direction for variety
-      const effects = [
-        'kenBurns1 18s ease-in-out infinite alternate',
-        'kenBurns2 20s ease-in-out infinite alternate',
-        'kenBurns3 16s ease-in-out infinite alternate',
-        'kenBurns4 22s ease-in-out infinite alternate'
-      ];
-      img.style.animation = effects[__flatTourIdx % effects.length];
-    };
-  }, 200);
+    img.style.transform = 'scale(1.4)';
+    img.style.filter = 'blur(3px)';
+    img.style.opacity = '0';
+    img.style.animation = 'none';
+
+    requestAnimationFrame(() => {
+      // Phase 3: Settle into normal view
+      img.style.transition = 'transform 0.8s ease-out, opacity 0.5s ease, filter 0.6s ease';
+      img.style.transform = 'scale(1)';
+      img.style.filter = 'blur(0px)';
+      img.style.opacity = '1';
+
+      // Phase 4: Start Ken Burns after settling
+      img.onload = () => {
+        setTimeout(() => {
+          const effects = [
+            'kenBurns1 18s ease-in-out infinite alternate',
+            'kenBurns2 20s ease-in-out infinite alternate',
+            'kenBurns3 16s ease-in-out infinite alternate',
+            'kenBurns4 22s ease-in-out infinite alternate'
+          ];
+          img.style.animation = effects[__flatTourIdx % effects.length];
+        }, 900);
+      };
+    });
+  }, 500);
 
   // Update counter
   document.getElementById('tour-counter').textContent = `${__flatTourIdx + 1} / ${keys.length}`;
@@ -2915,6 +2985,8 @@ function updateFlatTour() {
   // Update nav arrows
   document.getElementById('tour-prev-btn').style.display = __flatTourIdx > 0 ? '' : 'none';
   document.getElementById('tour-next-btn').style.display = __flatTourIdx < keys.length - 1 ? '' : 'none';
+  const walkBtn = document.getElementById('tour-walk-btn');
+  if (walkBtn) walkBtn.style.display = keys.length > 1 ? '' : 'none';
 
   // Update thumbstrip
   buildThumbstrip();
@@ -3087,7 +3159,7 @@ function initPannellumTour() {
       hfov: 110,
       minHfov: 50,
       maxHfov: 120,
-      autoRotate: -1.5,
+      autoRotate: -0.8,
       autoRotateInactivityDelay: 3000
     };
   });
@@ -3106,7 +3178,7 @@ function initPannellumTour() {
     __pannellumViewer = pannellum.viewer('pannellum-container', {
       default: {
         firstScene: firstScene,
-        sceneFadeDuration: 800,
+        sceneFadeDuration: 1500,
         autoLoad: true,
         showFullscreenCtrl: false,
         showZoomCtrl: false,
@@ -3558,7 +3630,11 @@ function buildGallery() {
       <div onclick="openLightbox(${i})">${media}</div>
       <div class="gallery-item-overlay">
         <span class="gallery-item-label">${item.label}</span>
-        <button onclick="event.stopPropagation();downloadSingleRender('${k}')" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.7);color:#fff;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;backdrop-filter:blur(4px)">⬇</button>
+        <div style="position:absolute;top:8px;right:8px;display:flex;gap:4px">
+          <button onclick="event.stopPropagation();rateRender('${k}','good')" style="background:${item.rating==='good'?'#10b981':'rgba(0,0,0,0.7)'};color:#fff;border:none;border-radius:6px;padding:4px 7px;font-size:12px;cursor:pointer;backdrop-filter:blur(4px)">👍</button>
+          <button onclick="event.stopPropagation();rateRender('${k}','bad')" style="background:${item.rating==='bad'?'#e05050':'rgba(0,0,0,0.7)'};color:#fff;border:none;border-radius:6px;padding:4px 7px;font-size:12px;cursor:pointer;backdrop-filter:blur(4px)">👎</button>
+          <button onclick="event.stopPropagation();downloadSingleRender('${k}')" style="background:rgba(0,0,0,0.7);color:#fff;border:none;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;backdrop-filter:blur(4px)">⬇</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -4463,8 +4539,20 @@ async function generateRenderFromChat(prompt, label) {
 
 function addRenderToGallery(src, label) {
   const key = 'gen_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
-  IMG[key] = { src, label };
+  IMG[key] = { src, label, rating: null, createdBy: __currentUser?.id || '?' };
   buildGallery();
+}
+
+function rateRender(key, rating) {
+  if (IMG[key]) {
+    IMG[key].rating = rating;
+    buildGallery();
+    if (rating === 'bad') {
+      showToast('👎 Marcado para regenerar. Escribe "regenera renders malos" en el chat.');
+    } else {
+      showToast('👍 ¡Excelente render!');
+    }
+  }
 }
 
 // Detect floor/zone from label for intelligent tour navigation
@@ -6866,6 +6954,60 @@ function __setupAutoSave() {
       __autoSaveProject();
     }
   }, 30000);
+}
+
+function exportPDFBrochure() {
+  const name = state.projectName || document.getElementById('b-name')?.value?.trim() || 'Proyecto';
+  const location = state.projectLocation || document.getElementById('b-location')?.value?.trim() || '';
+  const images = Object.values(IMG).filter(i => i.type !== 'video');
+  if (images.length === 0) { showToast('⚠️ No hay imágenes para el PDF'); return; }
+
+  // Generate a printable HTML brochure (user prints to PDF)
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${name} — Brochure</title>
+<style>
+@page{size:A4 landscape;margin:0}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;background:#fff;color:#1a1a1a}
+.cover{width:100vw;height:100vh;position:relative;display:flex;align-items:center;justify-content:center;page-break-after:always}
+.cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cover-overlay{position:relative;z-index:2;text-align:center;background:rgba(0,0,0,0.5);padding:60px 80px;border-radius:4px}
+.cover h1{font-size:48px;font-weight:800;color:#fff;letter-spacing:-1px;margin-bottom:8px}
+.cover h2{font-size:20px;color:#c4773b;font-weight:400;letter-spacing:4px;text-transform:uppercase}
+.cover p{color:rgba(255,255,255,0.7);font-size:14px;margin-top:16px}
+.page{width:100vw;height:100vh;page-break-after:always;padding:40px;display:flex;flex-direction:column}
+.page-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;flex:1}
+.page-img{border-radius:8px;overflow:hidden;position:relative}
+.page-img img{width:100%;height:100%;object-fit:cover;display:block}
+.page-img .caption{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.7));color:#fff;padding:16px 12px 8px;font-size:13px;font-weight:600}
+.page-header{font-size:10px;color:#999;display:flex;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid #eee;padding-bottom:8px}
+.footer{text-align:center;font-size:10px;color:#999;margin-top:auto;padding-top:16px}
+@media print{.no-print{display:none}}
+</style></head><body>
+<div class="cover">
+  <img src="${images[0]?.src || ''}" alt="Cover">
+  <div class="cover-overlay">
+    <h1>${name}</h1>
+    <h2>${location}</h2>
+    <p>Brochure generado por CayenaBot AI · ${new Date().toLocaleDateString('es')}</p>
+  </div>
+</div>
+${(() => {
+  let pages = '';
+  for (let i = 0; i < images.length; i += 4) {
+    const batch = images.slice(i, i + 4);
+    pages += `<div class="page"><div class="page-header"><span>${name} — ${location}</span><span>Página ${Math.floor(i/4) + 2}</span></div><div class="page-grid">${batch.map(img => `<div class="page-img"><img src="${img.src}" alt="${img.label}"><div class="caption">${img.label}</div></div>`).join('')}</div><div class="footer">CayenaBot AI PropTech Builder · ${location}</div></div>`;
+  }
+  return pages;
+})()}
+<div class="no-print" style="position:fixed;bottom:20px;right:20px;z-index:100">
+  <button onclick="window.print()" style="background:#c4773b;color:#fff;border:none;border-radius:10px;padding:14px 28px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,0.3)">🖨️ Imprimir / Guardar como PDF</button>
+</div>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+  showToast('📄 Brochure abierto — usa Ctrl+P o el botón para guardar como PDF');
 }
 
 function exportProject() {
