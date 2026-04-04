@@ -5618,12 +5618,58 @@ async function runSwarm(projectInfo) {
 
   // Generate a shared style seed for visual consistency across all renders
   state.__styleSeed = String(Math.floor(Math.random() * 999999999));
-  swarmLog('Coordinator', `🚀 Inicializando Ruflo Swarm — ${tasks.length} agentes, seed: ${state.__styleSeed}`);
-  swarmLog('Coordinator', '🎨 Estilo visual unificado para coherencia entre renders');
+  swarmLog('Coordinator', 'Inicializando Ruflo Swarm — ' + tasks.length + ' agentes');
+
+  // Phase 0: Analyze uploaded plans/images with AI vision for accurate renders
+  const uploadedImages = state.chatHistory.filter(function(m) {
+    return m.role === 'user' && typeof m.content !== 'string' && Array.isArray(m.content);
+  }).flatMap(function(m) {
+    return m.content.filter(function(c) { return c.type === 'image_url'; });
+  });
+
+  const planSrc = state.__currentPlanSrc || (uploadedImages.length > 0 ? uploadedImages[0].image_url?.url : null);
+
+  if (planSrc || state.__planAnalysis) {
+    swarmLog('Coordinator', 'Fase 0: Analizando planos con vision AI para renders precisos...');
+    if (!state.__planAnalysis && planSrc) {
+      try {
+        var visionModel = (state.freeModels || []).find(function(m) { return /vl|vision/i.test(m); }) || 'qwen/qwen-2.5-vl-72b-instruct:free';
+        var analysisResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST', signal: AbortSignal.timeout(60000),
+          headers: { 'Authorization': 'Bearer ' + state.orKey, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBuilder' },
+          body: JSON.stringify({
+            model: visionModel,
+            messages: [{ role: 'user', content: [
+              { type: 'image_url', image_url: { url: planSrc } },
+              { type: 'text', text: 'Analyze this architectural plan in detail. List: 1) All unit names/codes (E-1, E-2, etc), 2) Number of bedrooms/bathrooms per unit, 3) Common areas (pool, parking, lobby), 4) Approximate dimensions visible, 5) Architectural style visible, 6) Number of floors. Be specific and concise. Respond in English.' }
+            ]}]
+          })
+        });
+        if (analysisResp.ok) {
+          var analysisData = await analysisResp.json();
+          state.__planAnalysis = analysisData.choices?.[0]?.message?.content || '';
+          swarmLog('Coordinator', 'Plano analizado: ' + state.__planAnalysis.slice(0, 150) + '...');
+        }
+      } catch(e) {
+        swarmLog('Coordinator', 'Vision AI no disponible, usando prompts genericos');
+      }
+    } else if (state.__planAnalysis) {
+      swarmLog('Coordinator', 'Usando analisis previo del plano');
+    }
+  }
 
   // Separate render and non-render agents
   const renderAgents = swarmState.agents.filter(a => a.taskFn === 'render');
   const otherAgents = swarmState.agents.filter(a => a.taskFn !== 'render');
+
+  // Inject plan analysis into ALL render prompts for accuracy
+  if (state.__planAnalysis) {
+    var planContext = ', based on REAL floor plan showing: ' + state.__planAnalysis.slice(0, 500);
+    renderAgents.forEach(function(agent) {
+      if (agent.prompt) agent.prompt = agent.prompt + planContext;
+    });
+    swarmLog('Coordinator', 'Contexto del plano inyectado en ' + renderAgents.length + ' renders');
+  }
 
   // Phase 1: Run all non-render agents fast (batches of 15)
   swarmLog('Coordinator', `⚡ Fase 1: ${otherAgents.length} agentes no-render (rápido)`);
