@@ -991,7 +991,7 @@ function doLogin() {
 
   if (pass === __selectedUser.pass) {
     __currentUser = __selectedUser;
-    state.__user = { id: __currentUser.id, name: __currentUser.name, color: __currentUser.color, emoji: __currentUser.emoji };
+    state.__user = { id: __currentUser.id, name: __currentUser.name, color: __currentUser.color, initials: __currentUser.initials };
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('project-selector').style.display = '';
     refreshProjectList();
@@ -1000,7 +1000,7 @@ function doLogin() {
     const badge = document.getElementById('user-badge');
     if (badge) {
       badge.style.background = __currentUser.color;
-      badge.textContent = __currentUser.emoji;
+      badge.textContent = __currentUser.initials;
       badge.style.display = 'flex';
       badge.title = `${__currentUser.name} (${__currentUser.id}) — Click para cambiar usuario`;
     }
@@ -1571,7 +1571,7 @@ function deleteProject(idx) {
       <button class="toolbar-btn" onclick="exportPDFBrochure()">PDF</button>
       <button class="toolbar-btn" onclick="document.getElementById('import-input').click()">Importar</button>
       <button class="toolbar-btn" onclick="document.getElementById('upload-input').click()">Subir archivos</button>
-      <button class="toolbar-btn" id="swarm-toggle-btn" onclick="toggleSwarmPanel()" style="display:none">Swarm</button>
+      <button class="toolbar-btn" id="swarm-toggle-btn" onclick="toggleSwarmPanel()">Swarm</button>
       <input type="file" id="import-input" accept=".json" style="display:none" onchange="importProject(this.files[0]);this.value=''">
       <input type="file" id="upload-input" accept="image/*,.zip,.pdf,.dwg,.dxf,.skp,.fbx,.obj,.gltf,.glb,.3ds,.stl,.rvt" multiple style="display:none" onchange="handleFileUpload(this.files);this.value=''">
     </div>
@@ -4264,10 +4264,10 @@ async function sendChat() {
   }
 
   // Swarm activation — any request that implies generating visual content
-  const swarmKeywords = /(?:100\s*agentes|swarm|ruflo|desplegar|lanzar|genera|hazme|crea|haz|dame|necesito|quiero)\s*(?:agentes|renders?|tour|virtual|imagenes|fotos|visualiz|proyecto|el proyecto|todo|completo|de este|de eso|de mi|los renders|un tour|el tour|una galeria|plataforma)/i;
-  if (swarmKeywords.test(text) && !text.includes('?')) {
-    addMsg('assistant', '<strong>Preparando generacion</strong> — Selecciona el estilo visual para coherencia en todos los renders.');
-    setTimeout(function() { openStyleWizard(); }, 300);
+  const swarmKeywords = /(?:agentes|swarm|ruflo|desplegar|lanzar|genera|hazme|crea|haz|dame|necesito|quiero|render|tour|virtual|imagenes|fotos|proyecto|plataforma)/i;
+  if (swarmKeywords.test(text) && !text.includes('?') && text.length > 5) {
+    addMsg('assistant', '<strong>Preparando generacion</strong>');
+    setTimeout(function() { openStyleWizard(); }, 200);
     __chatProcessing = false;
     return;
   }
@@ -4495,7 +4495,7 @@ function addMsg(role, text) {
   const d = document.createElement('div');
   d.className = `msg msg-${role} fade-enter`;
   // Tag user messages with the current user's color and name
-  const userTag = (role === 'user' && __currentUser) ? `<span style="display:inline-block;background:${__currentUser.color};color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle">${__currentUser.emoji} ${__currentUser.id}</span>` : '';
+  const userTag = (role === 'user' && __currentUser) ? `<span style="display:inline-block;background:${__currentUser.color};color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle">${__currentUser.initials} ${__currentUser.id}</span>` : '';
   d.innerHTML = `<div class="msg-bubble">${userTag}${text.replace(/\n/g,'<br>')}</div>`;
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
