@@ -610,12 +610,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .fade-enter{animation:fadeIn 0.5s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 /* Ken Burns cinematic effect for flat tour */
-@keyframes kenBurns1{from{transform:scale(1.1) translate(0%,0%)}to{transform:scale(1.3) translate(-3%,-2%)}}
-@keyframes kenBurns2{from{transform:scale(1.15) translate(-2%,1%)}to{transform:scale(1.05) translate(2%,-1%)}}
-@keyframes kenBurns3{from{transform:scale(1.05) translate(2%,2%)}to{transform:scale(1.25) translate(-2%,0%)}}
-@keyframes kenBurns4{from{transform:scale(1.2) translate(-1%,-1%)}to{transform:scale(1.1) translate(1%,2%)}}
-#tour-flat-pan{overflow:hidden}
-#tour-flat-img{transform-origin:center center;will-change:transform}
+/* Tour image: simple subtle animation, no complex transforms */
+@keyframes tourSlow{from{transform:scale(1.0)}to{transform:scale(1.06)}}
+#tour-flat-pan{overflow:hidden;position:relative;width:100%;height:100%}
+#tour-flat-img{width:100%;height:100%;object-fit:cover;transition:opacity 0.6s ease}
 /* === PANNELLUM 360° TOUR === */
 #pannellum-container{position:absolute;inset:0;z-index:1}
 #pannellum-container .pnlm-render-container{cursor:grab}
@@ -1224,7 +1222,7 @@ function deleteProject(idx) {
       <!-- Flat tour viewer (main) -->
       <div id="tour-flat-viewer" style="position:absolute;inset:0;z-index:2;background:#0a0a1a;display:none;align-items:center;justify-content:center;overflow:hidden">
         <div id="tour-flat-pan" style="width:100%;height:100%;overflow:hidden;cursor:grab;position:relative">
-          <img id="tour-flat-img" style="width:100%;height:100%;object-fit:cover;transition:opacity 0.5s ease,transform 0.15s ease;transform-origin:center center" alt="Tour" draggable="false">
+          <img id="tour-flat-img" alt="Tour">
         </div>
         <!-- Left/Right nav arrows -->
         <button id="tour-prev-btn" onclick="tourFlatNav(-1)" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.6);color:#fff;border:2px solid rgba(255,255,255,0.3);border-radius:50%;width:48px;height:48px;font-size:22px;cursor:pointer;backdrop-filter:blur(8px);transition:all 0.2s;z-index:10" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(196,119,59,0.6)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.3)';this.style.background='rgba(0,0,0,0.6)'">‹</button>
@@ -3099,46 +3097,15 @@ function updateFlatTour() {
   const scene = SCENES[key];
   const imgSrc = IMG[scene.img]?.src || '';
 
-  // Walking transition: dolly zoom + fade + Ken Burns
-  const img = document.getElementById('tour-flat-img');
-  const container = document.getElementById('tour-flat-pan');
-
-  // Phase 1: "Walk forward" zoom into current image
-  img.style.transition = 'transform 0.6s ease-in, opacity 0.4s ease, filter 0.4s ease';
-  img.style.transform = 'scale(1.8)';
-  img.style.filter = 'blur(4px)';
-  img.style.opacity = '0.3';
-
-  setTimeout(() => {
-    // Phase 2: Swap image and "arrive" from zoomed in
-    img.style.transition = 'none';
+  // Simple clean transition: fade out, swap, fade in
+  var img = document.getElementById('tour-flat-img');
+  img.style.opacity = '0';
+  setTimeout(function() {
     img.src = imgSrc;
-    img.style.transform = 'scale(1.4)';
-    img.style.filter = 'blur(3px)';
-    img.style.opacity = '0';
-    img.style.animation = 'none';
-
-    requestAnimationFrame(() => {
-      // Phase 3: Settle into normal view
-      img.style.transition = 'transform 0.8s ease-out, opacity 0.5s ease, filter 0.6s ease';
-      img.style.transform = 'scale(1)';
-      img.style.filter = 'blur(0px)';
-      img.style.opacity = '1';
-
-      // Phase 4: Start Ken Burns after settling
-      img.onload = () => {
-        setTimeout(() => {
-          const effects = [
-            'kenBurns1 18s ease-in-out infinite alternate',
-            'kenBurns2 20s ease-in-out infinite alternate',
-            'kenBurns3 16s ease-in-out infinite alternate',
-            'kenBurns4 22s ease-in-out infinite alternate'
-          ];
-          img.style.animation = effects[__flatTourIdx % effects.length];
-        }, 900);
-      };
-    });
-  }, 500);
+    img.onload = function() { img.style.opacity = '1'; };
+    // Fallback if already cached
+    if (img.complete) img.style.opacity = '1';
+  }, 400);
 
   // Update counter
   document.getElementById('tour-counter').textContent = `${__flatTourIdx + 1} / ${keys.length}`;
@@ -3167,106 +3134,7 @@ function updateFlatTour() {
   updateMinimap();
 }
 
-// Pan & zoom for flat tour
-let __tourPan = { x: 0, y: 0, zoom: 1, dragging: false, startX: 0, startY: 0, lastX: 0, lastY: 0 };
-
-function resetTourPan() {
-  __tourPan = { x: 0, y: 0, zoom: 1, dragging: false, startX: 0, startY: 0, lastX: 0, lastY: 0 };
-  const img = document.getElementById('tour-flat-img');
-  if (img) img.style.transform = 'scale(1) translate(0px, 0px)';
-}
-
-function applyTourPan() {
-  const img = document.getElementById('tour-flat-img');
-  if (!img) return;
-  // Clamp pan so image never shows black background
-  const z = __tourPan.zoom;
-  if (z <= 1) {
-    __tourPan.x = 0; __tourPan.y = 0;
-  } else {
-    // Max pan is proportional to how much we're zoomed in
-    const maxPan = ((z - 1) / z) * 50; // percentage of image that can move
-    __tourPan.x = Math.max(-maxPan * 4, Math.min(maxPan * 4, __tourPan.x));
-    __tourPan.y = Math.max(-maxPan * 3, Math.min(maxPan * 3, __tourPan.y));
-  }
-  img.style.transform = `scale(${z}) translate(${__tourPan.x}px, ${__tourPan.y}px)`;
-}
-
-(function setupTourPanZoom() {
-  document.addEventListener('DOMContentLoaded', () => {
-    const container = document.getElementById('tour-flat-pan');
-    if (!container) return;
-
-    container.addEventListener('mousedown', e => {
-      __tourPan.dragging = true;
-      __tourPan.startX = __tourPan.lastX = e.clientX;
-      __tourPan.startY = __tourPan.lastY = e.clientY;
-      container.style.cursor = 'grabbing';
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', e => {
-      if (!__tourPan.dragging) return;
-      const dx = (e.clientX - __tourPan.lastX) / __tourPan.zoom;
-      const dy = (e.clientY - __tourPan.lastY) / __tourPan.zoom;
-      __tourPan.lastX = e.clientX;
-      __tourPan.lastY = e.clientY;
-      __tourPan.x += dx;
-      __tourPan.y += dy;
-      applyTourPan();
-    });
-    document.addEventListener('mouseup', () => {
-      __tourPan.dragging = false;
-      container.style.cursor = 'grab';
-    });
-
-    // Zoom with scroll
-    container.addEventListener('wheel', e => {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      __tourPan.zoom = Math.max(1, Math.min(5, __tourPan.zoom + delta));
-      if (__tourPan.zoom <= 1) { __tourPan.x = 0; __tourPan.y = 0; }
-      applyTourPan();
-    }, { passive: false });
-
-    // Touch support
-    let lastTouchDist = 0;
-    container.addEventListener('touchstart', e => {
-      if (e.touches.length === 1) {
-        __tourPan.dragging = true;
-        __tourPan.lastX = e.touches[0].clientX;
-        __tourPan.lastY = e.touches[0].clientY;
-      } else if (e.touches.length === 2) {
-        lastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      }
-    }, { passive: true });
-    container.addEventListener('touchmove', e => {
-      if (e.touches.length === 1 && __tourPan.dragging) {
-        const dx = (e.touches[0].clientX - __tourPan.lastX) / __tourPan.zoom;
-        const dy = (e.touches[0].clientY - __tourPan.lastY) / __tourPan.zoom;
-        __tourPan.lastX = e.touches[0].clientX;
-        __tourPan.lastY = e.touches[0].clientY;
-        __tourPan.x += dx; __tourPan.y += dy;
-        applyTourPan();
-      } else if (e.touches.length === 2) {
-        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        if (lastTouchDist) {
-          __tourPan.zoom = Math.max(1, Math.min(5, __tourPan.zoom * (dist / lastTouchDist)));
-          applyTourPan();
-        }
-        lastTouchDist = dist;
-      }
-    }, { passive: true });
-    container.addEventListener('touchend', () => { __tourPan.dragging = false; lastTouchDist = 0; });
-
-    // Double-tap/click to reset
-    let lastClick = 0;
-    container.addEventListener('click', () => {
-      const now = Date.now();
-      if (now - lastClick < 300) resetTourPan();
-      lastClick = now;
-    });
-  });
-})();
+// Pan/zoom removed — was causing glitches, freezes, and fighting with transitions
 
 // Auto-play tour (advances every 8 seconds)
 let __tourAutoplay = null;
@@ -3284,7 +3152,7 @@ function toggleTourAutoplay() {
 }
 
 function tourFlatNav(dir) {
-  resetTourPan();
+  // Navigate
   __flatTourIdx += dir;
   updateFlatTour();
 }
