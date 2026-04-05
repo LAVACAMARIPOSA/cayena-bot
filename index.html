@@ -5952,14 +5952,22 @@ async function runSwarm(projectInfo) {
 
     if (!state.__planRenderDescriptions && planSrc) {
       try {
-        var visionModel = (state.freeModels || []).find(function(m) { return /vl|vision/i.test(m); }) || 'qwen/qwen-2.5-vl-72b-instruct:free';
-
-        // === MEJORA FIDELIDAD PLANO-RENDER v2 === Enhanced structured prompt
-        var descResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST', signal: AbortSignal.timeout(90000),
-          headers: { 'Authorization': 'Bearer ' + state.orKey, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBuilder' },
-          body: JSON.stringify({
-            model: visionModel,
+        // === FIDELIDAD PLANO v3 === Try Gemini first for vision, then Qwen
+        var swarmVisionModels = [
+          'google/gemini-2.5-flash-preview-05-20:free',
+          'google/gemini-2.0-flash-exp:free',
+          'qwen/qwen-2.5-vl-72b-instruct:free'
+        ];
+        var descResp = null;
+        for (var vm = 0; vm < swarmVisionModels.length; vm++) {
+          var visionModel = swarmVisionModels[vm];
+          try {
+            swarmLog('Coordinator', 'Probando modelo de visión: ' + visionModel);
+            descResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST', signal: AbortSignal.timeout(90000),
+              headers: { 'Authorization': 'Bearer ' + state.orKey, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBuilder' },
+              body: JSON.stringify({
+                model: visionModel,
             messages: [{ role: 'user', content: [
               { type: 'image_url', image_url: { url: planSrc, detail: 'high' } },
               { type: 'text', text: `Eres un arquitecto profesional experto en lectura de planos. Analiza esta imagen con MÁXIMA PRECISIÓN.
@@ -5990,7 +5998,15 @@ REGLAS ESTRICTAS:
           })
         });
 
-        if (descResp.ok) {
+            if (descResp.ok) break;
+            swarmLog('Coordinator', visionModel + ' respondió HTTP ' + descResp.status);
+          } catch(e) {
+            swarmLog('Coordinator', visionModel + ' error: ' + e.message);
+            continue;
+          }
+        }
+
+        if (descResp && descResp.ok) {
           var descData = await descResp.json();
           var descText = descData.choices?.[0]?.message?.content || '';
 
@@ -7513,16 +7529,22 @@ async function processUploadedPlan(file) {
     analysisDiv.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:8px;color:var(--muted)">Analizando plano con AI (extracción estructurada)...</div></div>';
 
     try {
-      // === FIDELIDAD PLANO v3 - ABRIL 2026 === Prefer Gemini for plan analysis (better at diagrams/layouts)
-      const visionModel = state.freeModels?.find(m => /gemini.*vl|gemini.*flash/i.test(m)) || state.freeModels?.find(m => /vl|vision/i.test(m)) || 'qwen/qwen-2.5-vl-72b-instruct:free';
-
-      // Structured JSON extraction for render fidelity
-      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        signal: AbortSignal.timeout(90000),
-        headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
-        body: JSON.stringify({
-          model: visionModel,
+      // === FIDELIDAD PLANO v3 - ABRIL 2026 === Try multiple vision models (Gemini first, then Qwen)
+      const visionModels = [
+        'google/gemini-2.5-flash-preview-05-20:free',
+        'google/gemini-2.0-flash-exp:free',
+        'qwen/qwen-2.5-vl-72b-instruct:free'
+      ];
+      let resp = null;
+      for (const visionModel of visionModels) {
+        try {
+          console.log('processUploadedPlan: trying', visionModel);
+          resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            signal: AbortSignal.timeout(90000),
+            headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+            body: JSON.stringify({
+              model: visionModel,
           messages: [{
             role: 'user',
             content: [
@@ -7563,8 +7585,15 @@ REGLAS MUY ESTRICTAS:
           }]
         })
       });
+          if (resp.ok) break;
+          console.log('processUploadedPlan:', visionModel, 'HTTP', resp.status);
+        } catch(e) {
+          console.log('processUploadedPlan:', visionModel, 'error:', e.message);
+          continue;
+        }
+      }
 
-      if (resp.ok) {
+      if (resp && resp.ok) {
         const d = await resp.json();
         const text = d.choices?.[0]?.message?.content || 'No se pudo analizar';
 
@@ -7598,10 +7627,10 @@ REGLAS MUY ESTRICTAS:
           addPlanChat('ai', '📋 Plano analizado. Puedes pedirme modificaciones, cálculos de m², sugerencias de mejoras, o generar renders 3D.');
         }
       } else {
-        analysisDiv.innerHTML = `<div style="color:#e05">❌ Error analizando: HTTP ${resp.status}</div>`;
+        analysisDiv.innerHTML = `<div style="color:#e05">❌ Ningún modelo de visión respondió.${!state.orKey ? ' Configura tu OpenRouter API key en Settings.' : ' Verifica tu API key o intenta de nuevo.'}</div>`;
       }
     } catch(e) {
-      analysisDiv.innerHTML = `<div style="color:#e05">❌ ${e.message}</div>`;
+      analysisDiv.innerHTML = `<div style="color:#e05">❌ ${e.message}${!state.orKey ? '<br>⚠️ No hay API key configurada. Ve a Settings y agrega tu OpenRouter key.' : ''}</div>`;
     }
   };
   reader.readAsDataURL(file);
@@ -7610,22 +7639,32 @@ REGLAS MUY ESTRICTAS:
 async function autoFillFromPlan() {
   const src = state.__currentPlanSrc;
   if (!src) { showToast('⚠️ Sube un plano primero'); return; }
+  if (!state.orKey) { showToast('⚠️ Configura tu OpenRouter API key primero (Settings)'); return; }
 
   const btn = document.getElementById('pw-autofill-btn');
   btn.disabled = true;
   btn.textContent = '⏳ Analizando plano...';
 
   try {
-    const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
+    // === FIDELIDAD PLANO v3 === Use Gemini Flash for vision (reliable, supports images natively)
+    const visionModels = [
+      'google/gemini-2.5-flash-preview-05-20:free',
+      'google/gemini-2.0-flash-exp:free',
+      'qwen/qwen-2.5-vl-72b-instruct:free'
+    ];
 
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST', signal: AbortSignal.timeout(60000),
-      headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
-      body: JSON.stringify({
-        model: visionModel,
-        messages: [{ role: 'user', content: [
-          { type: 'image_url', image_url: { url: src } },
-          { type: 'text', text: `Analiza este plano arquitectónico y responde SOLO en este formato JSON exacto, sin texto adicional:
+    let resp = null;
+    for (const visionModel of visionModels) {
+      try {
+        console.log('autoFillFromPlan: trying model', visionModel);
+        resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST', signal: AbortSignal.timeout(60000),
+          headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+          body: JSON.stringify({
+            model: visionModel,
+            messages: [{ role: 'user', content: [
+              { type: 'image_url', image_url: { url: src, detail: 'high' } },
+              { type: 'text', text: `Analiza este plano arquitectónico y responde SOLO en este formato JSON exacto, sin texto adicional:
 {
   "project_type": "residencial-multifamiliar|residencial-villas|townhouse|mixto|hotel|comercial",
   "stage": "anteproyecto|preliminar|ejecutivo|construccion",
@@ -7637,9 +7676,17 @@ async function autoFillFromPlan() {
   "has_parking": true/false,
   "notes": "breve descripción de lo que ves: unidades identificadas, áreas comunes, observaciones"
 }` }
-        ]}]
-      })
-    });
+            ]}]
+          })
+        });
+        if (resp.ok) break;
+        console.log('autoFillFromPlan: model', visionModel, 'returned HTTP', resp.status);
+      } catch(e) {
+        console.log('autoFillFromPlan: model', visionModel, 'error:', e.message);
+        continue;
+      }
+    }
+    if (!resp || !resp.ok) throw new Error('Ningún modelo de visión respondió. Verifica tu API key.');
 
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const d = await resp.json();
