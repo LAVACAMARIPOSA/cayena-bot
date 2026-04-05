@@ -4499,10 +4499,37 @@ async function sendChat() {
     return;
   }
 
-  // Switch to planos tab
+  // Switch to planos tab — bridge images from chat if available
   if (/(?:analiza|sube|ve a|abre).*(?:plano|floor\s*plan)/i.test(text)) {
-    addMsg('assistant', '📐 Cambiando a Planos AI...');
     switchTab('planos');
+    // If user attached an image in chat, auto-load it into the plan system
+    if (images.length > 0) {
+      const imgData = images[0].data; // base64 data URL
+      state.__currentPlanSrc = imgData;
+      // Pre-load as Image element for cropping
+      const planImg = new Image();
+      planImg.src = imgData;
+      state.__currentPlanImage = planImg;
+      // Update plan UI with the image
+      const pwUpload = document.getElementById('pw-step-upload');
+      if (pwUpload) pwUpload.innerHTML = `<div style="display:flex;gap:12px;align-items:center;padding:8px"><img src="${imgData}" style="height:80px;border-radius:8px;border:1px solid var(--border)"><div><div style="font-weight:600;font-size:14px">${images[0].name || 'Plano desde chat'}</div><div style="font-size:12px;color:var(--gold)">✅ Plano cargado desde chat — completa los datos técnicos abajo</div></div></div>`;
+      const pwContext = document.getElementById('pw-step-context');
+      if (pwContext) pwContext.style.display = '';
+      const planOrigImg = document.getElementById('plan-original-img');
+      if (planOrigImg) planOrigImg.src = imgData;
+      // Save to floor plans
+      const key = 'chat_' + Date.now();
+      if (typeof FLOOR_PLANS !== 'undefined') { FLOOR_PLANS[key] = { src: imgData, label: images[0].name || 'Plano desde chat' }; if (typeof buildFloorPlans === 'function') buildFloorPlans(); }
+      addMsg('assistant', '📐 <strong>Plano cargado automáticamente</strong> desde el chat. Analizando con AI...');
+      // Auto-trigger AI analysis
+      setTimeout(() => {
+        const analysisDiv = document.getElementById('plan-analysis');
+        if (analysisDiv) analysisDiv.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:8px;color:var(--muted)">Analizando plano con AI...</div></div>';
+        processUploadedPlan_fromBase64(imgData, images[0].name || 'plano.png');
+      }, 300);
+    } else {
+      addMsg('assistant', '📐 Cambiando a Planos AI. Sube un plano para analizarlo.');
+    }
     __chatProcessing = false;
     return;
   }
@@ -6029,7 +6056,7 @@ async function runSwarm(projectInfo) {
               body: JSON.stringify({
                 model: visionModel,
             messages: [{ role: 'user', content: [
-              { type: 'image_url', image_url: { url: planSrc, detail: 'high' } },
+              { type: 'image_url', image_url: visionModel.includes('gemini') ? { url: planSrc, detail: 'high' } : { url: planSrc } },
               { type: 'text', text: `Eres un arquitecto profesional experto en lectura de planos. Analiza esta imagen con MÁXIMA PRECISIÓN.
 
 Devuelve ÚNICAMENTE un JSON array válido (sin texto extra, sin markdown):
@@ -7569,6 +7596,10 @@ function handlePlanUpload(event) {
 }
 
 async function processUploadedPlan(file) {
+  // Warn about very large files that may fail API calls
+  if (file.size > 10 * 1024 * 1024) {
+    showToast('⚠️ Imagen muy grande (>10MB). Reduce el tamaño para mejor compatibilidad.');
+  }
   const reader = new FileReader();
   reader.onload = async (e) => {
     const src = e.target.result;
@@ -7612,7 +7643,7 @@ async function processUploadedPlan(file) {
           messages: [{
             role: 'user',
             content: [
-              { type: 'image_url', image_url: { url: src, detail: 'high' } },
+              { type: 'image_url', image_url: visionModel.includes('gemini') ? { url: src, detail: 'high' } : { url: src } },
               { type: 'text', text: `Eres un topógrafo y arquitecto experto en lectura de planos. Analiza esta imagen de plano CON MÁXIMA EXACTITUD.
 
 Devuelve SOLO un JSON válido (nada de texto extra, nada de markdown):
@@ -7650,7 +7681,8 @@ REGLAS MUY ESTRICTAS:
         })
       });
           if (resp.ok) break;
-          console.log('processUploadedPlan:', visionModel, 'HTTP', resp.status);
+          const errBody = await resp.text().catch(() => '');
+          console.log('processUploadedPlan:', visionModel, 'HTTP', resp.status, errBody.slice(0, 100));
         } catch(e) {
           console.log('processUploadedPlan:', visionModel, 'error:', e.message);
           continue;
@@ -7700,6 +7732,107 @@ REGLAS MUY ESTRICTAS:
   reader.readAsDataURL(file);
 }
 
+// Process plan from base64 data URL (used when bridging from chat)
+async function processUploadedPlan_fromBase64(src, fileName) {
+  state.__currentPlanSrc = src;
+  const planImg = new Image();
+  planImg.src = src;
+  state.__currentPlanImage = planImg;
+
+  // Save to FLOOR_PLANS
+  const fpKey = 'chat_' + Date.now();
+  FLOOR_PLANS[fpKey] = { src, label: fileName };
+  buildFloorPlans();
+
+  const analysisDiv = document.getElementById('plan-analysis');
+  if (!analysisDiv) return;
+  analysisDiv.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:8px;color:var(--muted)">Analizando plano con AI (extracción estructurada)...</div></div>';
+
+  if (!state.orKey) {
+    analysisDiv.innerHTML = '<div style="color:#e05;padding:12px">⚠️ No hay API key. Ve a ⚙️ Settings y agrega tu OpenRouter key.</div>';
+    return;
+  }
+
+  try {
+    const visionModels = [
+      'google/gemini-2.5-flash-preview-05-20:free',
+      'google/gemini-2.0-flash-exp:free',
+      'qwen/qwen-2.5-vl-72b-instruct:free'
+    ];
+    let resp = null;
+    const errors = [];
+    for (const visionModel of visionModels) {
+      try {
+        console.log('processUploadedPlan_fromBase64: trying', visionModel);
+        // Only add detail:'high' for Gemini models (Qwen rejects it)
+        const imgObj = visionModel.includes('gemini') ? { url: src, detail: 'high' } : { url: src };
+        resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          signal: AbortSignal.timeout(90000),
+          headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': window.location.href || 'https://cayenabot.ai', 'X-Title': 'CayenaBot' },
+          body: JSON.stringify({
+            model: visionModel,
+            messages: [{ role: 'user', content: [
+              { type: 'image_url', image_url: imgObj },
+              { type: 'text', text: `Eres un topógrafo y arquitecto experto. Analiza esta imagen de plano CON MÁXIMA EXACTITUD.
+Devuelve SOLO un JSON válido (nada de texto extra, nada de markdown):
+{
+  "project_name": "Nombre deducido o 'Proyecto Cayena'",
+  "overall_description": "Descripción breve del layout general",
+  "rooms": [{ "code": "E-1", "name": "Sala Principal", "bbox": {"x": 12, "y": 25, "width": 35, "height": 40}, "estimated_dimensions": "6.8m x 5.1m", "room_shape": "rectangular", "wall_north": "descripción", "wall_south": "descripción", "wall_east": "descripción", "wall_west": "descripción", "key_features": "...", "adjacent_spaces": "...", "detailed_render_prompt": "..." }]
+}
+REGLAS: Extrae códigos REALES del plano. bbox en PORCENTAJES (0-100). NO inventes nada. Lista TODOS los espacios visibles.` }
+            ]}]
+          })
+        });
+        if (resp.ok) { console.log('processUploadedPlan_fromBase64:', visionModel, '✅'); break; }
+        const errBody = await resp.text().catch(() => '');
+        errors.push(`${visionModel.split('/')[1]}: HTTP ${resp.status} - ${errBody.slice(0, 80)}`);
+        console.log('processUploadedPlan_fromBase64:', visionModel, 'HTTP', resp.status);
+      } catch(e) {
+        errors.push(`${visionModel.split('/')[1]}: ${e.message}`);
+        continue;
+      }
+    }
+
+    if (resp && resp.ok) {
+      const d = await resp.json();
+      const text = d.choices?.[0]?.message?.content || 'No se pudo analizar';
+      const parsed = __robustParseJSON(text);
+      if (parsed && parsed.rooms && parsed.rooms.length > 0) {
+        state.__planRoomsJSON = parsed.rooms;
+        state.__planRenderDescriptions = parsed.rooms.map(r => ({
+          space: (r.code || '') + ' ' + (r.name || ''),
+          bbox: r.bbox ? { x: r.bbox.x, y: r.bbox.y, w: r.bbox.width || r.bbox.w, h: r.bbox.height || r.bbox.h } : null,
+          dimensions: r.estimated_dimensions || '',
+          render_prompt: r.detailed_render_prompt || '',
+          orientation: r.orientation || '',
+          adjacent: r.adjacent_spaces || ''
+        }));
+        await __generateRoomCrops(planImg, state.__planRoomsJSON);
+        const roomList = parsed.rooms.map(r => `<strong>${r.code || '?'}</strong> ${r.name} (${r.estimated_dimensions || '?'})`).join('<br>');
+        analysisDiv.innerHTML = `<div style="font-size:12px;color:var(--gold);margin-bottom:8px;font-weight:600">📋 Análisis Estructurado — ${parsed.rooms.length} espacios</div>
+          <div style="margin-bottom:8px;font-size:12px;color:var(--muted)">${parsed.overall_description || ''}</div>
+          <div style="line-height:1.8;font-size:13px">${roomList}</div>
+          <div style="margin-top:12px"><button onclick="regenerateFaithfulRenders()" style="background:linear-gradient(135deg,var(--gold),#e09560);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer">🔄 Generar Renders Fieles al Plano</button></div>`;
+        state.__planAnalysis = text;
+        addPlanChat('ai', `📋 Plano analizado desde chat: ${parsed.rooms.length} espacios. Puedes generar renders fieles.`);
+        addMsg('assistant', `✅ <strong>Plano analizado:</strong> ${parsed.rooms.length} espacios detectados. Revisa la pestaña Planos para detalles.`);
+      } else {
+        analysisDiv.innerHTML = `<div style="font-size:12px;color:var(--gold);margin-bottom:8px;font-weight:600">📋 Análisis del Plano</div><div style="white-space:pre-wrap;line-height:1.5">${text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</div>`;
+        state.__planAnalysis = text;
+        addPlanChat('ai', '📋 Plano analizado. Puedes pedir modificaciones o generar renders.');
+      }
+    } else {
+      const errorDetail = errors.length > 0 ? '<br><small style="color:var(--muted)">' + errors.join('<br>') + '</small>' : '';
+      analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">❌ Ningún modelo de visión respondió.${errorDetail}</div>`;
+      addMsg('assistant', '⚠️ No se pudo analizar el plano automáticamente. Intenta de nuevo desde la pestaña Planos.');
+    }
+  } catch(e) {
+    analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">❌ ${e.message}</div>`;
+  }
+}
+
 async function autoFillFromPlan() {
   const src = state.__currentPlanSrc;
   if (!src) { showToast('⚠️ Sube un plano primero'); return; }
@@ -7727,7 +7860,7 @@ async function autoFillFromPlan() {
           body: JSON.stringify({
             model: visionModel,
             messages: [{ role: 'user', content: [
-              { type: 'image_url', image_url: { url: src, detail: 'high' } },
+              { type: 'image_url', image_url: visionModel.includes('gemini') ? { url: src, detail: 'high' } : { url: src } },
               { type: 'text', text: `Analiza este plano arquitectónico y responde SOLO en este formato JSON exacto, sin texto adicional:
 {
   "project_type": "residencial-multifamiliar|residencial-villas|townhouse|mixto|hotel|comercial",
@@ -7744,15 +7877,14 @@ async function autoFillFromPlan() {
           })
         });
         if (resp.ok) break;
-        console.log('autoFillFromPlan: model', visionModel, 'returned HTTP', resp.status);
+        const errBody = await resp.text().catch(() => '');
+        console.log('autoFillFromPlan: model', visionModel, 'returned HTTP', resp.status, errBody.slice(0, 100));
       } catch(e) {
         console.log('autoFillFromPlan: model', visionModel, 'error:', e.message);
         continue;
       }
     }
-    if (!resp || !resp.ok) throw new Error('Ningún modelo de visión respondió. Verifica tu API key.');
-
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    if (!resp || !resp.ok) throw new Error('Ningún modelo de visión respondió. Verifica tu API key o intenta de nuevo.');
     const d = await resp.json();
     const text = d.choices?.[0]?.message?.content || '';
 
@@ -8026,8 +8158,10 @@ PREGUNTA DEL CLIENTE: ${text}
 
 Responde en español. Sé técnico y profesional. Si piden modificaciones, explica: qué cambiar, impacto estructural, costo estimado, y si cumple normativa. NO puedes dibujar pero describe los cambios con precisión para que un arquitecto los implemente.`;
 
+    // Only add detail:'high' for Gemini models (Qwen rejects it)
+    const imgObj = visionModel.includes('gemini') ? { url: planSrc, detail: 'high' } : { url: planSrc };
     const userContent = planSrc
-      ? [{ type: 'image_url', image_url: { url: planSrc, detail: 'high' } }, { type: 'text', text: contextPrefix }]
+      ? [{ type: 'image_url', image_url: imgObj }, { type: 'text', text: contextPrefix }]
       : contextPrefix;
 
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
