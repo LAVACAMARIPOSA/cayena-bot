@@ -4161,8 +4161,28 @@ async function sendChat() {
     return;
   }
 
-  // Swarm activation — any request that implies generating visual content
-  const swarmKeywords = /(?:agentes|swarm|ruflo|desplegar|lanzar|genera|hazme|crea|haz|dame|necesito|quiero|render|tour|virtual|imagenes|fotos|proyecto|plataforma)/i;
+  // === MEJORA FIDELIDAD 100% + CALIDAD + SWARM v2026 === Smarter swarm trigger
+  const swarmKeywords = /(?:agentes|swarm|ruflo|desplegar|lanzar|genera|hazme|crea|haz|dame|necesito|quiero|render|tour|virtual|imagenes|fotos|plataforma)/i;
+  const swarmDirectLaunch = /(?:hazme\s+(?:renders|tour|el\s+tour)|genera\s+renders|lanza\s+(?:swarm|agentes|renders)|inicia\s+(?:swarm|renders|tour)|arranca|desplegar\s+agentes)/i;
+  if (swarmDirectLaunch.test(text) && text.length > 5) {
+    // Direct swarm launch — skip wizard if we already have project data or plan
+    const projectInfo = parseProjectFromChat();
+    if (!projectInfo.name) projectInfo.name = state.projectName || 'Mi Proyecto';
+    if (!projectInfo.location) projectInfo.location = state.projectLocation || '';
+    if (state.__currentPlanSrc || projectInfo.name !== 'Mi Proyecto') {
+      // We have enough context — launch immediately
+      if (!state.__styleDNA) state.__styleDNA = 'fotorealista, tropical modern, luxury Caribbean, iluminación natural cinematográfica, 8K, Architectural Digest';
+      addMsg('assistant', `🚀 <strong>Activando Ruflo Swarm Engine</strong><br>📍 ${projectInfo.location || 'Sin ubicación'}<br>🎨 ${(state.__styleDNA || '').slice(0, 80)}...<br>Desplegando agentes para: <strong>${projectInfo.name}</strong>${state.__currentPlanSrc ? '<br>📋 Plano cargado — renders fieles al layout' : ''}`);
+      setTimeout(() => runSwarm(projectInfo), 300);
+      __chatProcessing = false;
+      return;
+    }
+    // No plan or project data — open wizard to collect info
+    addMsg('assistant', '<strong>Preparando generación</strong> — Configura tu proyecto:');
+    setTimeout(function() { openStyleWizard(); }, 200);
+    __chatProcessing = false;
+    return;
+  }
   if (swarmKeywords.test(text) && !text.includes('?') && text.length > 5) {
     addMsg('assistant', '<strong>Preparando generacion</strong>');
     setTimeout(function() { openStyleWizard(); }, 200);
@@ -4650,7 +4670,7 @@ Render this specific view: ${prompt}` });
         headers: { 'Content-Type': 'application/json', 'apikey': '0000000000', 'Client-Agent': 'CayenaBot:1.0:cayenabot' },
         body: JSON.stringify({
           prompt: `photorealistic architectural render, luxury real estate, ${prompt}, professional photography, exact proportions, precise layout ### ${opts.faithfulMode ? 'different layout, wrong proportions, extra rooms, moved walls, ' : ''}blurry, cartoon, anime, nsfw, nude, person, text, watermark`,
-          params: { width: 1024, height: 512, steps: 20, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
+          params: { width: 1344, height: 768, steps: 25, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
           models: ['AlbedoBase XL (SDXL)', 'SDXL 1.0', 'Deliberate', 'stable_diffusion'],
           nsfw: true, censor_nsfw: false, r2: true, replacement_filter: true
         })
@@ -4679,29 +4699,14 @@ Render this specific view: ${prompt}` });
       throw new Error('Timeout');
     });
 
-    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Enhanced Pollinations with negative prompt support
-    const seed = opts.faithfulMode ? (state.__styleSeed || Date.now()) : (Date.now() + Math.floor(Math.random() * 10000));
-    // Pollinations supports negative prompt via URL parameter
-    const negParam = opts.coherent ? '&negative=' + encodeURIComponent('different layout, wrong proportions, extra rooms, moved walls, blurry, cartoon, text, watermark') : '';
-    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 300))}?width=1024&height=768&model=flux&nologo=true&seed=${seed}${negParam}`;
-    providers.push(async () => {
-      const pUrl = `https://corsproxy.io/?url=${encodeURIComponent(pollUrl)}`;
-      const r = await fetch(pUrl, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
-      if (!r.ok) throw new Error('Pollinations HTTP ' + r.status);
-      const blob = await r.blob();
-      if (blob.size < 1000 || !blob.type.startsWith('image')) throw new Error('Not an image');
-      console.log('Pollinations: ✅ (seed=' + seed + ')');
-      return await __toDataUrl(blob);
-    });
-
-    // Provider 5: Together.ai (if key available)
+    // === MEJORA FIDELIDAD 100% + CALIDAD + SWARM v2026 === Together.ai BEFORE Pollinations (higher quality)
     const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
     if (togetherKey) {
       providers.push(async () => {
         const r = await fetch('https://api.together.xyz/v1/images/generations', {
           method: 'POST', signal: AbortSignal.timeout(30000),
           headers: { 'Authorization': `Bearer ${togetherKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell-Free', prompt, width: 1024, height: 768, steps: 4, n: 1, response_format: 'b64_json' })
+          body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell-Free', prompt, width: 1344, height: 768, steps: opts.faithfulMode ? 8 : 4, n: 1, response_format: 'b64_json' })
         });
         if (!r.ok) throw new Error('Together HTTP ' + r.status);
         const d = await r.json();
@@ -4711,6 +4716,20 @@ Render this specific view: ${prompt}` });
         return `data:image/png;base64,${b64}`;
       });
     }
+
+    // === MEJORA FIDELIDAD 100% + CALIDAD + SWARM v2026 === Pollinations as fallback (after Together.ai)
+    const seed = opts.faithfulMode ? (state.__styleSeed || Date.now()) : (Date.now() + Math.floor(Math.random() * 10000));
+    const negParam = opts.coherent ? '&negative=' + encodeURIComponent('different layout, wrong proportions, extra rooms, moved walls, blurry, cartoon, smearing, melting, text, watermark') : '';
+    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 400))}?width=1344&height=768&model=flux&nologo=true&seed=${seed}${negParam}&enhance=true`;
+    providers.push(async () => {
+      const pUrl = `https://corsproxy.io/?url=${encodeURIComponent(pollUrl)}`;
+      const r = await fetch(pUrl, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
+      if (!r.ok) throw new Error('Pollinations HTTP ' + r.status);
+      const blob = await r.blob();
+      if (blob.size < 1000 || !blob.type.startsWith('image')) throw new Error('Not an image');
+      console.log('Pollinations: ✅ (seed=' + seed + ', 1344x768)');
+      return await __toDataUrl(blob);
+    });
 
     // COHERENT mode: try providers in ORDER (not race) for consistent style
     // RACE mode: fire all simultaneously for speed (single renders from chat)
@@ -4963,38 +4982,74 @@ function __rebuildTourNavigation() {
   // Reset all navigation
   sceneData.forEach(s => { SCENES[s.key].nav = { n: null, e: null, w: null, s: null }; });
 
-  // For each scene, find logical neighbors
+  // === MEJORA FIDELIDAD 100% + CALIDAD + SWARM v2026 === Use plan JSON adjacency for walking order
+  const planRooms = state.__planRoomsJSON || state.__planRenderDescriptions;
+  if (planRooms && planRooms.length > 0) {
+    // Build walking path from plan data: follow adjacency info
+    const walkOrder = [];
+    // Exterior scenes first
+    sceneData.filter(s => s.zone === 'exterior').forEach(s => walkOrder.push(s));
+    // Then interior scenes ordered by plan room order (which follows physical layout)
+    sceneData.filter(s => s.zone === 'interior' || s.zone === 'common').forEach(s => {
+      // Find matching plan room by label
+      const match = planRooms.find(r => {
+        const roomLabel = ((r.code || '') + ' ' + (r.name || r.space || '')).toLowerCase();
+        return s.label && (s.label.toLowerCase().includes(roomLabel.trim()) || roomLabel.includes(s.label.toLowerCase().slice(0, 8)));
+      });
+      walkOrder.push({ ...s, planIdx: match ? planRooms.indexOf(match) : 999 });
+    });
+    // Sort interior scenes by plan order
+    walkOrder.sort((a, b) => {
+      if (a.zone === 'exterior' && b.zone !== 'exterior') return -1;
+      if (a.zone !== 'exterior' && b.zone === 'exterior') return 1;
+      return (a.planIdx || 999) - (b.planIdx || 999);
+    });
+    // Link them sequentially: E→next, W→previous (walking tour)
+    walkOrder.forEach((s, i) => {
+      SCENES[s.key].nav.e = i < walkOrder.length - 1 ? walkOrder[i + 1].key : walkOrder[0].key;
+      SCENES[s.key].nav.w = i > 0 ? walkOrder[i - 1].key : walkOrder[walkOrder.length - 1].key;
+    });
+    // N/S for floor transitions
+    walkOrder.forEach(s => {
+      const candidates = walkOrder.filter(c => c.key !== s.key);
+      const upstairs = candidates.find(c => c.floor === (s.floor || 0) + 1);
+      const downstairs = candidates.find(c => c.floor === (s.floor || 0) - 1);
+      if (upstairs) SCENES[s.key].nav.n = upstairs.key;
+      if (downstairs) SCENES[s.key].nav.s = downstairs.key;
+      // N for exterior link if no upstairs
+      if (!SCENES[s.key].nav.n && s.zone === 'interior') {
+        const ext = candidates.find(c => c.zone === 'exterior');
+        if (ext) SCENES[s.key].nav.n = ext.key;
+      }
+    });
+    return; // Done — plan-based navigation built
+  }
+
+  // Fallback: original adjacency-based navigation
   sceneData.forEach((s, i) => {
     const candidates = sceneData.filter(c => c.key !== s.key);
     const adj = __ROOM_ADJACENCY[s.room] || __ROOM_ADJACENCY.other;
 
-    // Same floor, adjacent room → East/West
     const sameFloor = candidates.filter(c => c.floor === s.floor);
     const adjacent = sameFloor.filter(c => adj.includes(c.room));
     const preferred = adjacent.length > 0 ? adjacent : sameFloor;
 
-    // East: next logical room on same floor
     if (!SCENES[s.key].nav.e && preferred.length > 0) {
-      // Pick the first unlinked adjacent room
       const east = preferred.find(c => !Object.values(SCENES[s.key].nav).includes(c.key));
       if (east) SCENES[s.key].nav.e = east.key;
     }
 
-    // West: previous room (reverse link)
     if (!SCENES[s.key].nav.w && i > 0) {
       const sameFloorPrev = sceneData.slice(0, i).reverse().find(c => c.floor === s.floor);
       if (sameFloorPrev) SCENES[s.key].nav.w = sameFloorPrev.key;
     }
 
-    // North: go upstairs (higher floor, same zone)
     const upstairs = candidates.find(c => c.floor === s.floor + 1 && c.zone === s.zone);
     if (upstairs) SCENES[s.key].nav.n = upstairs.key;
 
-    // South: go downstairs (lower floor, same zone)
     const downstairs = candidates.find(c => c.floor === s.floor - 1 && c.zone === s.zone);
     if (downstairs) SCENES[s.key].nav.s = downstairs.key;
 
-    // If no N/S (single floor), use N for exterior and S for going back
     if (!SCENES[s.key].nav.n && s.zone === 'interior') {
       const ext = candidates.find(c => c.zone === 'exterior' && c.floor === s.floor);
       if (ext) SCENES[s.key].nav.n = ext.key;
