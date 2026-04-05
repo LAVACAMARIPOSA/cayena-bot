@@ -4493,6 +4493,9 @@ async function generateImage(prompt, opts = {}) {
       });
     }
 
+    // HuggingFace key — used by ControlNet and panorama models
+    var hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
+
     // Provider 0.3: ControlNet (uses plan as spatial guide — best for plan-accurate renders)
     var controlRef = opts.planCropSrc || state.__currentPlanSrc;
     if (hfKey && controlRef) {
@@ -4522,7 +4525,6 @@ async function generateImage(prompt, opts = {}) {
     }
 
     // Provider 0.5: HuggingFace 360° panorama models (FREE, trained for equirectangular)
-    const hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
     if (hfKey) {
       // sdxl-360-diffusion: specifically trained on equirectangular images
       providers.push(async () => {
