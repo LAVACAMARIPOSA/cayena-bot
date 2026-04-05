@@ -2481,7 +2481,8 @@ async function autoDetectLocation() {
 }
 
 // Fallback: use OpenRouter AI to describe a location for render prompts
-async function aiDescribeLocation(location, ctxEl, statusEl) {
+async function aiDescribeLocation(loc, ctxEl, statusEl) {
+  if (!state.orKey) { statusEl.innerHTML = '<span style="color:#e05">⚠️ No hay API key configurada.</span>'; return; }
   try {
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -2489,14 +2490,14 @@ async function aiDescribeLocation(location, ctxEl, statusEl) {
       headers: {
         'Authorization': `Bearer ${state.orKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': location.href,
+        'HTTP-Referer': window.location.href || 'https://cayenabot.ai',
         'X-Title': 'CayenaBot'
       },
       body: JSON.stringify({
         model: 'google/gemini-2.0-flash-exp:free',
         messages: [{
           role: 'user',
-          content: `Describe the physical location "${location}" for architectural render prompts. Include:
+          content: `Describe the physical location "${loc}" for architectural render prompts. Include:
 1. Is it beachfront, near beach, or inland? Approximate distance to coast.
 2. Terrain: flat, hilly, elevated, mountainous?
 3. Vegetation type: tropical, desert, temperate?
@@ -4583,6 +4584,12 @@ async function sendChat() {
     return;
   }
   
+  // Validate at least one API key is available
+  if (!state.orKey && !state.groqKey && !state.openaiKey && !state.claudeKey) {
+    addMsg('assistant', '⚠️ <strong>No hay API key configurada.</strong> Abre ⚙️ Configuración y agrega tu OpenRouter API key para usar el chat.');
+    return;
+  }
+
   __chatProcessing = true;
   __chatAbortController = new AbortController();
   const thinkEl = addThinking();
@@ -4650,7 +4657,17 @@ async function sendChat() {
 
   let reply = null;
   let lastError = '';
-  const msgs = [{ role: 'system', content: SYSTEM_PROMPT }, ...state.chatHistory.slice(-12)];
+  // Build messages array, stripping multimodal image content for text-only models
+  const rawHistory = state.chatHistory.slice(-12);
+  const textOnlyMsgs = [{ role: 'system', content: SYSTEM_PROMPT }, ...rawHistory.map(m => {
+    if (Array.isArray(m.content)) {
+      // Extract only text parts from multimodal messages
+      const textParts = m.content.filter(p => p.type === 'text').map(p => p.text).join('\n');
+      return { role: m.role, content: textParts || '[imagen adjunta]' };
+    }
+    return { role: m.role, content: m.content || '' };
+  })];
+  const msgs = [{ role: 'system', content: SYSTEM_PROMPT }, ...rawHistory];
 
   for (const prov of chatProviders) {
     try {
@@ -4659,7 +4676,7 @@ async function sendChat() {
       if (prov.type === 'groq') {
         url = 'https://api.groq.com/openai/v1/chat/completions';
         headers = { 'Authorization': `Bearer ${prov.key}`, 'Content-Type': 'application/json' };
-        body = { model: prov.model, messages: msgs, max_tokens: 1500 };
+        body = { model: prov.model, messages: textOnlyMsgs, max_tokens: 1500 };
       } else if (prov.type === 'openai') {
         url = 'https://api.openai.com/v1/chat/completions';
         headers = { 'Authorization': `Bearer ${prov.key}`, 'Content-Type': 'application/json' };
@@ -4667,12 +4684,48 @@ async function sendChat() {
       } else if (prov.type === 'claude') {
         url = 'https://api.anthropic.com/v1/messages';
         headers = { 'x-api-key': prov.key, 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
-        body = { model: prov.model, max_tokens: 1500, system: SYSTEM_PROMPT, messages: state.chatHistory.slice(-12).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })) };
+        // Convert messages to Claude format: fix image_url→source blocks, ensure alternating roles, strip nulls
+        const claudeMsgs = [];
+        state.chatHistory.slice(-12).forEach(m => {
+          const role = m.role === 'assistant' ? 'assistant' : 'user';
+          let content = m.content;
+          // Convert OpenAI-style image_url content to Claude source blocks
+          if (Array.isArray(content)) {
+            content = content.map(part => {
+              if (part.type === 'image_url' && part.image_url?.url) {
+                const url = part.image_url.url;
+                if (url.startsWith('data:')) {
+                  const match = url.match(/^data:(image\/[^;]+);base64,(.+)$/);
+                  if (match) return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
+                }
+                return { type: 'image', source: { type: 'url', url: url } };
+              }
+              if (part.type === 'text') return { type: 'text', text: part.text || '' };
+              return part;
+            }).filter(Boolean);
+          }
+          if (!content) return; // skip empty messages
+          // Ensure alternating roles: merge consecutive same-role messages
+          if (claudeMsgs.length > 0 && claudeMsgs[claudeMsgs.length - 1].role === role) {
+            const prev = claudeMsgs[claudeMsgs.length - 1];
+            const prevText = typeof prev.content === 'string' ? prev.content : '';
+            const curText = typeof content === 'string' ? content : (Array.isArray(content) ? content.filter(p => p.type === 'text').map(p => p.text).join('\n') : '');
+            prev.content = prevText + '\n' + curText;
+          } else {
+            claudeMsgs.push({ role, content });
+          }
+        });
+        // Ensure first message is from user
+        if (claudeMsgs.length > 0 && claudeMsgs[0].role !== 'user') {
+          claudeMsgs.unshift({ role: 'user', content: 'Hola' });
+        }
+        body = { model: prov.model, max_tokens: 1500, system: SYSTEM_PROMPT, messages: claudeMsgs };
       } else {
-        // OpenRouter
+        // OpenRouter — use full msgs for vision models, textOnly for others
         url = 'https://openrouter.ai/api/v1/chat/completions';
         headers = { 'Authorization': `Bearer ${prov.key}`, 'Content-Type': 'application/json', 'HTTP-Referer': window.location.origin || 'https://cayenabot.ai', 'X-Title': 'CayenaBot' };
-        body = { model: prov.model, messages: msgs, max_tokens: 1500 };
+        const isVisionModel = /vl|vision|gemini/i.test(prov.model);
+        body = { model: prov.model, messages: isVisionModel ? msgs : textOnlyMsgs, max_tokens: 1500 };
       }
 
       const resp = await fetch(url, {
@@ -4702,6 +4755,9 @@ async function sendChat() {
             ? 'La API key de OpenRouter es inválida o fue revocada. Abre ⚙️ Configuración y pega una key vigente.'
             : lastError;
           addMsg('assistant', `⚠️ <strong>Error de autenticación:</strong> ${authMsg}`);
+          __chatProcessing = false;
+          __chatAbortController = null;
+          __processNextInQueue();
           return;
         }
         continue;
@@ -4822,7 +4878,6 @@ const __IMG_MAX_CONCURRENT = 5;
 // OpenRouter dedicated image generation models (free!)
 const __OR_IMAGE_MODELS = [
   'google/gemini-2.5-flash-image-preview:free',
-  'google/gemini-3.1-flash-image-preview:free',
   'google/gemini-2.0-flash-exp:free'
 ];
 
@@ -4855,6 +4910,10 @@ function __extractImageFromMsg(msg) {
 }
 
 async function generateImage(prompt, opts = {}) {
+  if (!state.orKey && !state.hfKey && !state.skyboxKey) {
+    console.log('generateImage: no API keys configured');
+    return null;
+  }
   const fast = opts.fast || false;
 
   // Concurrency gate
@@ -5810,6 +5869,7 @@ async function retryRender(agentId) {
 async function optimizeTour() {
   const sceneKeys = Object.keys(SCENES);
   if (sceneKeys.length < 2) { showToast('⚠️ Necesitas al menos 2 renders para optimizar'); return; }
+  if (!state.orKey) { showToast('⚠️ Configura tu OpenRouter API key primero (Settings)'); return; }
 
   showToast('🧠 Optimizando tour virtual...');
   closeSwarm();
@@ -6758,6 +6818,10 @@ function saveSettings() {
   const orVal = document.getElementById('or-key-input').value.trim();
   if (orVal) { state.orKey = orVal; localStorage.setItem('cayenabot_or_key', orVal); }
 
+  const hfVal = document.getElementById('hf-key-input')?.value?.trim();
+  if (hfVal) { state.hfKey = hfVal; localStorage.setItem('cayenabot_hf_key', hfVal); }
+  else { state.hfKey = ''; localStorage.removeItem('cayenabot_hf_key'); }
+
   const openaiVal = document.getElementById('openai-key-input').value.trim();
   if (openaiVal) { state.openaiKey = openaiVal; localStorage.setItem('cayenabot_openai_key', openaiVal); }
   else { state.openaiKey = ''; localStorage.removeItem('cayenabot_openai_key'); }
@@ -7036,7 +7100,7 @@ async function diagRenders() {
       return { size: b64.length, url: `data:image/png;base64,${b64}` };
     }},
     { name: 'OpenRouter Gemini Image (GRATIS)', fn: async (row) => {
-      const models = ['google/gemini-2.5-flash-image-preview:free', 'google/gemini-3.1-flash-image-preview:free', 'google/gemini-2.0-flash-exp:free'];
+      const models = ['google/gemini-2.5-flash-image-preview:free', 'google/gemini-2.0-flash-exp:free'];
       const errors = [];
       for (const model of models) {
         const shortName = model.split('/')[1].replace(':free','');
@@ -7794,31 +7858,52 @@ Responde en español. Usa formato con encabezados y listas. Sé específico con 
   analysisDiv.innerHTML = '<div style="text-align:center;padding:30px"><div class="spinner"></div><div style="margin-top:10px;color:var(--muted)">Analizando plano con AI arquitectónica...<br><small>Esto puede tardar 30-60 segundos</small></div></div>';
 
   try {
-    const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
+    if (!state.orKey) {
+      analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">⚠️ No hay API key configurada. Ve a ⚙️ Settings y agrega tu OpenRouter key.</div>`;
+      return;
+    }
+    // Try multiple vision models with fallback (like processUploadedPlan)
+    const visionModels = [
+      state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')),
+      'google/gemini-2.5-flash-preview-05-20:free',
+      'google/gemini-2.0-flash-exp:free',
+      'qwen/qwen-2.5-vl-72b-instruct:free'
+    ].filter(Boolean);
 
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST', signal: AbortSignal.timeout(90000),
-      headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
-      body: JSON.stringify({
-        model: visionModel,
-        messages: [{ role: 'user', content: [
-          { type: 'image_url', image_url: { url: src } },
-          { type: 'text', text: analysisPrompt }
-        ]}]
-      })
-    });
+    let resp = null;
+    for (const visionModel of visionModels) {
+      try {
+        console.log('launchPlanAnalysis: trying', visionModel);
+        resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST', signal: AbortSignal.timeout(90000),
+          headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
+          body: JSON.stringify({
+            model: visionModel,
+            messages: [{ role: 'user', content: [
+              { type: 'image_url', image_url: { url: src } },
+              { type: 'text', text: analysisPrompt }
+            ]}]
+          })
+        });
+        if (resp.ok) break;
+        console.log('launchPlanAnalysis:', visionModel, 'HTTP', resp.status);
+      } catch(e) {
+        console.log('launchPlanAnalysis:', visionModel, 'error:', e.message);
+        continue;
+      }
+    }
 
-    if (resp.ok) {
+    if (resp && resp.ok) {
       const d = await resp.json();
       const text = d.choices?.[0]?.message?.content || 'No se pudo analizar';
       analysisDiv.innerHTML = `<div style="font-size:12px;color:var(--gold);margin-bottom:8px;font-weight:600">📋 Análisis Profesional</div><div style="white-space:pre-wrap;line-height:1.6;font-size:13px">${text.replace(/\*\*(.*?)\*\*/g, '<strong style="color:var(--gold)">$1</strong>').replace(/\n/g, '<br>')}</div>`;
       state.__planAnalysis = text;
       addPlanChat('ai', '✅ Análisis completado. Puedes pedirme modificaciones, cálculos adicionales, o generar renders 3D de áreas específicas.');
     } else {
-      analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">❌ Error: HTTP ${resp.status}. Intenta de nuevo.</div>`;
+      analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">❌ Ningún modelo de visión respondió.${!state.orKey ? ' Configura tu OpenRouter API key en Settings.' : ' Verifica tu API key o intenta de nuevo.'}</div>`;
     }
   } catch(e) {
-    analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">❌ ${e.message}</div>`;
+    analysisDiv.innerHTML = `<div style="color:#e05;padding:12px">❌ ${e.message}${!state.orKey ? '<br>⚠️ No hay API key configurada.' : ''}</div>`;
   }
 }
 
@@ -7839,6 +7924,7 @@ async function visualModifyPlan() {
 
   const planSrc = state.__currentPlanSrc;
   if (!planSrc) { showToast('⚠️ No hay plano cargado'); return; }
+  if (!state.orKey) { showToast('⚠️ Configura tu OpenRouter API key primero (Settings)'); return; }
 
   const btn = document.getElementById('plan-visual-modify-btn');
   btn.disabled = true;
@@ -7919,6 +8005,7 @@ async function sendPlanModification() {
   const input = document.getElementById('plan-chat-input');
   const text = input.value.trim();
   if (!text) return;
+  if (!state.orKey) { showToast('⚠️ Configura tu OpenRouter API key primero (Settings)'); return; }
   input.value = '';
 
   addPlanChat('user', text);
@@ -7990,6 +8077,7 @@ async function renderUploadedPlan(src, btn) {
   // Use the actual plan image, not just a text prompt
   const planSrc = src || state.__currentPlanSrc;
   if (!planSrc) { showToast('⚠️ No hay plano cargado'); return; }
+  if (!state.orKey) { showToast('⚠️ Configura tu OpenRouter API key primero (Settings)'); return; }
 
   const resultDiv = document.getElementById('uploaded-plan-result') || document.getElementById('plan-visual-result');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando...'; }
