@@ -4547,18 +4547,27 @@ async function generateImage(prompt, opts = {}) {
       });
     }
 
-    // Provider 2: OpenRouter Gemini (first model only for speed)
+    // Provider 2: OpenRouter Gemini — uses plan image as reference if available (img2img)
     providers.push(async () => {
+      var msgContent = [];
+      // If we have a floor plan, send it as reference image for img2img
+      var planRef = state.__currentPlanSrc;
+      if (planRef && opts.coherent) {
+        msgContent.push({ type: 'image_url', image_url: { url: planRef } });
+        msgContent.push({ type: 'text', text: 'Based on this floor plan, generate a photorealistic architectural render of: ' + prompt });
+      } else {
+        msgContent.push({ type: 'text', text: 'Generate a high quality photorealistic image of: ' + prompt });
+      }
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST', signal: AbortSignal.timeout(fast ? 45000 : 90000),
-        headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
-        body: JSON.stringify({ model: __OR_IMAGE_MODELS[0], messages: [{ role: 'user', content: [{ type: 'text', text: `Generate a high quality photorealistic image of: ${prompt}` }] }], modalities: ['image', 'text'] })
+        headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBuilder' },
+        body: JSON.stringify({ model: __OR_IMAGE_MODELS[0], messages: [{ role: 'user', content: msgContent }], modalities: ['image', 'text'] })
       });
       if (!resp.ok) throw new Error('OR HTTP ' + resp.status);
       const d = await resp.json();
       const url = __extractImageFromMsg(d.choices?.[0]?.message);
-      if (url) { console.log('OpenRouter: ✅'); return url; }
-      throw new Error('No image in response');
+      if (url) { console.log('OpenRouter + plan ref: done'); return url; }
+      throw new Error('No image');
     });
 
     // Provider 3: AI Horde (fast settings)
@@ -5559,13 +5568,23 @@ async function runSwarm(projectInfo) {
   const renderAgents = swarmState.agents.filter(a => a.taskFn === 'render');
   const otherAgents = swarmState.agents.filter(a => a.taskFn !== 'render');
 
-  // Inject plan analysis into ALL render prompts for accuracy
+  // REWRITE render prompts using plan analysis — not append, REPLACE
   if (state.__planAnalysis) {
-    var planContext = ', based on REAL floor plan showing: ' + state.__planAnalysis.slice(0, 500);
+    var analysis = state.__planAnalysis;
     renderAgents.forEach(function(agent) {
-      if (agent.prompt) agent.prompt = agent.prompt + planContext;
+      if (!agent.prompt) return;
+      // Build a prompt that STARTS with the plan context
+      var task = agent.task || '';
+      var dna = state.__styleDNA || '';
+      var loc = projectInfo.location || '';
+      var projName = projectInfo.name || '';
+      agent.prompt = projName + ' in ' + loc + ', ' + task + ', ' +
+        'this is a REAL project with this floor plan: ' + analysis.slice(0, 300) + ', ' +
+        dna + ', ' +
+        'photorealistic architectural render matching the actual floor plan layout, ' +
+        '8K, cinematic lighting, no text no watermark';
     });
-    swarmLog('Coordinator', 'Contexto del plano inyectado en ' + renderAgents.length + ' renders');
+    swarmLog('Coordinator', 'Prompts reescritos con datos del plano real para ' + renderAgents.length + ' renders');
   }
 
   // Phase 1: Run all non-render agents fast (batches of 15)
