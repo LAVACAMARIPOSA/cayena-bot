@@ -4571,18 +4571,33 @@ async function generateImage(prompt, opts = {}) {
       });
     }
 
-    // Provider 1: Local SD (if configured)
+    // Provider 1: Local SD (if configured) — uses img2img when plan available
     const sdUrl = state.localSdUrl;
     if (sdUrl) {
       providers.push(async () => {
-        const sdResp = await fetch(`${sdUrl}/sdapi/v1/txt2img`, {
+        var planRef = opts.planCropSrc || state.__currentPlanSrc;
+        var endpoint = (planRef && opts.coherent) ? `${sdUrl}/sdapi/v1/img2img` : `${sdUrl}/sdapi/v1/txt2img`;
+        var payload = {
+          prompt: `photorealistic architectural render EXACTLY matching floor plan, ${prompt}, high quality, 8k, precise proportions, exact wall positions`,
+          negative_prompt: opts.faithfulMode ? __FAITHFUL_NEGATIVE : 'cartoon, anime, sketch, low quality, blurry, text, watermark',
+          steps: fast ? 8 : (opts.faithfulMode ? 28 : 20),
+          cfg_scale: opts.faithfulMode ? 8.5 : 7,
+          width: 1024, height: 768,
+          sampler_name: 'DPM++ 2M'
+        };
+        // === MEJORA FIDELIDAD PLANO-RENDER v2 === img2img with high denoising for plan fidelity
+        if (planRef && opts.coherent) {
+          payload.init_images = [planRef];
+          payload.denoising_strength = opts.faithfulMode ? 0.92 : 0.85;
+        }
+        const sdResp = await fetch(endpoint, {
           method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: `photorealistic architectural render, ${prompt}, high quality, 8k, exact proportions`, negative_prompt: opts.faithfulMode ? __FAITHFUL_NEGATIVE : 'cartoon, anime, sketch, low quality, blurry, text, watermark', steps: fast ? 8 : (opts.faithfulMode ? 25 : 20), cfg_scale: opts.faithfulMode ? 8.5 : 7, width: 1024, height: 768, sampler_name: 'DPM++ 2M' })
+          body: JSON.stringify(payload)
         });
         if (!sdResp.ok) throw new Error('SD HTTP ' + sdResp.status);
         const d = await sdResp.json();
-        if (d.images?.[0]) { console.log('Local SD: ✅'); return `data:image/png;base64,${d.images[0]}`; }
+        if (d.images?.[0]) { console.log('Local SD: ✅ (denoising=' + (payload.denoising_strength || 'txt2img') + ')'); return `data:image/png;base64,${d.images[0]}`; }
         throw new Error('No image');
       });
     }
@@ -7305,10 +7320,9 @@ async function autoFillFromPlan() {
     const d = await resp.json();
     const text = d.choices?.[0]?.message?.content || '';
 
-    // Parse JSON from response (might be wrapped in markdown code block)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const data = JSON.parse(jsonMatch[0]);
+    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Use robust JSON parser
+    const data = __robustParseJSON(text);
+    if (data) {
 
       // Fill form fields
       if (data.project_type) document.getElementById('pw-project-type').value = data.project_type;
@@ -8928,6 +8942,30 @@ function downloadGeneratedProject() {
   a.click(); URL.revokeObjectURL(url);
   showToast('⬇️ Descargando HTML...');
 }
+
+// =============================================================================
+// === RESUMEN DE MEJORAS: FIDELIDAD PLANO → RENDER v2 (2026-04) ==============
+// =============================================================================
+// 1. processUploadedPlan: prompt estructurado que extrae JSON con rooms, bbox,
+//    dimensions, orientation, adjacent_spaces, detailed_render_prompt
+// 2. __robustParseJSON: parser robusto que maneja ```json, trailing commas,
+//    arrays vs objetos, comillas simples
+// 3. __generateRoomCrops: genera crops canvas con 3% padding por bbox,
+//    almacenados en state.__roomCrops y room._cropSrc
+// 4. regenerateFaithfulRenders: función + botón UI para re-generar renders
+//    fieles al plano usando crops + prompts ultra-detallados
+// 5. generateImage mejorado:
+//    - ControlNet: conditioning_scale 0.96, 30 steps, guidance 9.5 en faithfulMode
+//    - Gemini: envía AMBAS imágenes (plano completo + crop) con 7 reglas estrictas
+//    - Local SD: img2img con denoising_strength 0.92 cuando hay plano
+//    - Pollinations: negative prompt vía URL, seed consistente
+//    - Todos: __FAITHFUL_NEGATIVE contra cambios de layout
+// 6. runSwarm: Phase 0 reutiliza pre-análisis, prompts con orientación/adyacencia/
+//    descripción por pared, logging visible de fidelidad
+// 7. autoFillFromPlan: usa __robustParseJSON
+// 8. Globals: state.__planRoomsJSON, state.__roomCrops, state.__currentPlanImage
+// 9. Prioridad de providers en coherent mode: ControlNet > Gemini > otros
+// =============================================================================
 
 </script>
 </body>
