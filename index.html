@@ -8219,8 +8219,15 @@ function init() {
       document.getElementById('chat-toggle-btn').textContent = 'Preview';
     }
   }, { passive: true });
-  // Try load saved project
-  loadProject();
+  // Try load saved project — only if projects exist, load the most recent one (index 0)
+  try {
+    var savedProjects = getAllSavedProjects();
+    if (savedProjects && savedProjects.length > 0) {
+      loadProject(0);
+    }
+  } catch(e) {
+    console.log('No saved projects to load');
+  }
 }
 
 init();
