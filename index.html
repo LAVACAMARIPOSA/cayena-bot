@@ -2068,21 +2068,47 @@ function finishCameraCapture() {
       <div class="sw-grid" id="sw-interior-grid"></div>
     </div>
 
-    <!-- Step 3: Color Palette -->
+    <!-- Step 3: Decoration -->
     <div class="sw-section" style="margin-top:24px">
-      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">3. Paleta de Colores</h3>
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">3. Decoracion</h3>
+      <div class="sw-grid sw-grid-sm" id="sw-decor-grid"></div>
+    </div>
+
+    <!-- Step 4: Materials -->
+    <div class="sw-section" style="margin-top:24px">
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">4. Materiales</h3>
+      <div class="sw-grid sw-grid-sm" id="sw-materials-grid"></div>
+    </div>
+
+    <!-- Step 5: Color Palette -->
+    <div class="sw-section" style="margin-top:24px">
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">5. Paleta de Colores</h3>
       <div class="sw-grid sw-grid-sm" id="sw-palette-grid"></div>
+      <!-- Custom color picker -->
+      <div style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px">
+        <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px">O elige tus propios colores:</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;gap:4px" id="sw-custom-colors">
+            <input type="color" value="#c4773b" class="sw-color-pick" style="width:36px;height:36px;border:2px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;background:none;padding:0" onchange="updateCustomPalette()">
+            <input type="color" value="#1a1a2e" class="sw-color-pick" style="width:36px;height:36px;border:2px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;background:none;padding:0" onchange="updateCustomPalette()">
+            <input type="color" value="#ffffff" class="sw-color-pick" style="width:36px;height:36px;border:2px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;background:none;padding:0" onchange="updateCustomPalette()">
+            <input type="color" value="#10b981" class="sw-color-pick" style="width:36px;height:36px;border:2px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;background:none;padding:0" onchange="updateCustomPalette()">
+            <input type="color" value="#8b6914" class="sw-color-pick" style="width:36px;height:36px;border:2px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;background:none;padding:0" onchange="updateCustomPalette()">
+          </div>
+          <button onclick="applyCustomPalette()" style="padding:6px 14px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;font-size:11px;cursor:pointer;font-weight:600">Usar estos colores</button>
+        </div>
+      </div>
     </div>
 
     <!-- Step 4: Lighting -->
     <div class="sw-section" style="margin-top:24px">
-      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">4. Iluminación Preferida</h3>
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">6. Iluminacion</h3>
       <div class="sw-grid sw-grid-sm" id="sw-lighting-grid"></div>
     </div>
 
     <!-- Step 5: Render Quantity -->
     <div class="sw-section" style="margin-top:24px">
-      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">5. Cantidad de Renders</h3>
+      <h3 style="color:var(--gold);font-size:16px;margin-bottom:12px">7. Cantidad de Renders</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" id="sw-quantity-grid">
         <div class="sw-card" onclick="selectRenderQuantity(this,'key')" style="padding:16px">
           <div style="font-size:24px;margin-bottom:6px">📸</div>
@@ -5632,35 +5658,66 @@ async function runSwarm(projectInfo) {
 // =============================================
 const STYLE_OPTIONS = {
   architecture: [
-    { id: 'tropical-modern', label: 'Tropical Moderna', desc: 'Líneas limpias, techos planos, ventanales amplios, integración con naturaleza', img: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=400&h=250&fit=crop', prompt: 'tropical modern architecture, clean lines, flat roof, floor-to-ceiling windows, indoor-outdoor living' },
-    { id: 'mediterranean', label: 'Mediterránea', desc: 'Arcos, tejas de barro, estuco blanco, terrazas con vista', img: 'https://images.unsplash.com/photo-1523217582562-09d0def993a6?w=400&h=250&fit=crop', prompt: 'Mediterranean architecture, white stucco walls, terracotta roof tiles, arched windows, stone accents' },
-    { id: 'minimalist', label: 'Minimalista', desc: 'Formas puras, concreto expuesto, menos es más', img: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=400&h=250&fit=crop', prompt: 'minimalist contemporary architecture, exposed concrete, geometric forms, monochrome palette, clean volumes' },
-    { id: 'colonial-caribbean', label: 'Colonial Caribeña', desc: 'Colores vibrantes, balcones de madera, techos altos', img: 'https://images.unsplash.com/photo-1580587771525-78b9dba3b914?w=400&h=250&fit=crop', prompt: 'Caribbean colonial architecture, colorful facade, wooden balconies, high ceilings, tropical details' },
-    { id: 'industrial-loft', label: 'Industrial Loft', desc: 'Ladrillo expuesto, acero, espacios abiertos de doble altura', img: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=400&h=250&fit=crop', prompt: 'industrial loft architecture, exposed brick, steel beams, open floor plan, double height ceilings, raw materials' },
-    { id: 'eco-sustainable', label: 'Eco-Sostenible', desc: 'Techos verdes, materiales naturales, paneles solares', img: 'https://images.unsplash.com/photo-1518780664697-55e3ad937233?w=400&h=250&fit=crop', prompt: 'eco sustainable architecture, green roof, natural materials, bamboo, solar panels, living walls, biophilic design' }
+    { id: 'tropical-modern', label: 'Tropical Moderna', desc: 'Lineas limpias, techos planos, ventanales amplios', img: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=400&h=250&fit=crop', prompt: 'tropical modern architecture, clean lines, flat roof, floor-to-ceiling windows, indoor-outdoor living' },
+    { id: 'mediterranean', label: 'Mediterranea', desc: 'Arcos, tejas de barro, estuco blanco', img: 'https://images.unsplash.com/photo-1523217582562-09d0def993a6?w=400&h=250&fit=crop', prompt: 'Mediterranean architecture, white stucco, terracotta roof, arched windows, stone accents' },
+    { id: 'minimalist', label: 'Minimalista', desc: 'Formas puras, concreto, menos es mas', img: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=400&h=250&fit=crop', prompt: 'minimalist contemporary architecture, exposed concrete, geometric forms, clean volumes' },
+    { id: 'colonial-caribbean', label: 'Colonial Caribena', desc: 'Colores vibrantes, balcones de madera', img: 'https://images.unsplash.com/photo-1580587771525-78b9dba3b914?w=400&h=250&fit=crop', prompt: 'Caribbean colonial architecture, colorful facade, wooden balconies, high ceilings' },
+    { id: 'industrial-loft', label: 'Industrial Loft', desc: 'Ladrillo expuesto, acero, doble altura', img: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=400&h=250&fit=crop', prompt: 'industrial loft, exposed brick, steel beams, open floor plan, double height ceilings' },
+    { id: 'eco-sustainable', label: 'Eco-Sostenible', desc: 'Techos verdes, materiales naturales', img: 'https://images.unsplash.com/photo-1518780664697-55e3ad937233?w=400&h=250&fit=crop', prompt: 'eco sustainable architecture, green roof, natural materials, bamboo, solar panels, biophilic' },
+    { id: 'brutalist', label: 'Brutalista', desc: 'Concreto masivo, formas geometricas dramaticas', img: 'https://images.unsplash.com/photo-1488972685288-c3fd157d7c7a?w=400&h=250&fit=crop', prompt: 'brutalist architecture, raw concrete, massive geometric forms, dramatic shadows, bold structural elements' },
+    { id: 'art-deco', label: 'Art Deco', desc: 'Geometria decorativa, dorados, glamour', img: 'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&h=250&fit=crop', prompt: 'art deco architecture, geometric decorative patterns, gold accents, glamorous facade, 1920s luxury style' },
+    { id: 'japanese-zen', label: 'Japonesa / Zen', desc: 'Madera, piedra, agua, simplicidad', img: 'https://images.unsplash.com/photo-1480074568708-e7b720bb3f09?w=400&h=250&fit=crop', prompt: 'Japanese zen architecture, natural wood, stone gardens, water features, paper screens, minimalist harmony' },
+    { id: 'glass-modern', label: 'Vidrio + Acero', desc: 'Transparencia total, estructura visible', img: 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=400&h=250&fit=crop', prompt: 'glass and steel modern architecture, full transparency, visible structure, cantilever, panoramic views' }
   ],
   interior: [
-    { id: 'luxury-modern', label: 'Lujo Moderno', desc: 'Mármol, acabados premium, muebles de diseñador', img: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=400&h=250&fit=crop', prompt: 'luxury modern interior, marble floors, designer furniture, premium finishes, crystal chandeliers' },
-    { id: 'scandinavian', label: 'Escandinavo', desc: 'Madera clara, blancos, simplicidad funcional', img: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=250&fit=crop', prompt: 'Scandinavian interior design, light wood, white walls, functional simplicity, hygge atmosphere, natural textiles' },
-    { id: 'boho-tropical', label: 'Boho Tropical', desc: 'Ratán, plantas, texturas naturales, colores tierra', img: 'https://images.unsplash.com/photo-1617806118233-18e1de247200?w=400&h=250&fit=crop', prompt: 'bohemian tropical interior, rattan furniture, indoor plants, natural textures, earth tones, macrame, woven textiles' },
-    { id: 'contemporary-art', label: 'Contemporáneo + Arte', desc: 'Galería en casa, piezas statement, sofisticado', img: 'https://images.unsplash.com/photo-1600607687644-c7171b42498f?w=400&h=250&fit=crop', prompt: 'contemporary art gallery interior, statement art pieces, sophisticated furniture, gallery lighting, curated decor' },
-    { id: 'resort-spa', label: 'Resort & Spa', desc: 'Zen, piedra natural, agua, iluminación ambiental', img: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&h=250&fit=crop', prompt: 'resort spa interior, zen atmosphere, natural stone, water features, ambient lighting, bamboo, orchids' },
-    { id: 'coastal-chic', label: 'Coastal Chic', desc: 'Blancos y azules, madera drift, vistas al mar', img: 'https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?w=400&h=250&fit=crop', prompt: 'coastal chic interior, white and blue palette, driftwood accents, ocean views, linen fabrics, nautical details' }
+    { id: 'luxury-modern', label: 'Lujo Moderno', desc: 'Marmol, acabados premium, diseno', img: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=400&h=250&fit=crop', prompt: 'luxury modern interior, marble floors, designer furniture, premium finishes, crystal chandeliers' },
+    { id: 'scandinavian', label: 'Escandinavo', desc: 'Madera clara, blancos, funcional', img: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=250&fit=crop', prompt: 'Scandinavian interior, light wood, white walls, functional simplicity, hygge, natural textiles' },
+    { id: 'boho-tropical', label: 'Boho Tropical', desc: 'Ratan, plantas, texturas naturales', img: 'https://images.unsplash.com/photo-1617806118233-18e1de247200?w=400&h=250&fit=crop', prompt: 'bohemian tropical interior, rattan furniture, indoor plants, earth tones, macrame, woven textiles' },
+    { id: 'contemporary-art', label: 'Contemporaneo + Arte', desc: 'Galeria en casa, sofisticado', img: 'https://images.unsplash.com/photo-1600607687644-c7171b42498f?w=400&h=250&fit=crop', prompt: 'contemporary art gallery interior, statement pieces, sophisticated furniture, gallery lighting' },
+    { id: 'resort-spa', label: 'Resort & Spa', desc: 'Zen, piedra natural, agua', img: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&h=250&fit=crop', prompt: 'resort spa interior, zen atmosphere, natural stone, water features, ambient lighting, orchids' },
+    { id: 'coastal-chic', label: 'Coastal Chic', desc: 'Blancos y azules, madera, mar', img: 'https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?w=400&h=250&fit=crop', prompt: 'coastal chic interior, white and blue palette, driftwood accents, ocean views, linen fabrics' },
+    { id: 'mid-century', label: 'Mid-Century Modern', desc: 'Retro elegante, madera, organico', img: 'https://images.unsplash.com/photo-1556228453-efd6c1ff04f6?w=400&h=250&fit=crop', prompt: 'mid-century modern interior, walnut wood, organic curves, Eames furniture, warm tones, retro elegant' },
+    { id: 'maximalist', label: 'Maximalista', desc: 'Colores, patrones, texturas, mas es mas', img: 'https://images.unsplash.com/photo-1618219908412-a29a1bb7b86e?w=400&h=250&fit=crop', prompt: 'maximalist interior, bold colors, mixed patterns, rich textures, eclectic art, layered decor, jewel tones' },
+    { id: 'wabi-sabi', label: 'Wabi-Sabi', desc: 'Imperfeccion bella, materiales crudos', img: 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=400&h=250&fit=crop', prompt: 'wabi-sabi interior, raw plaster walls, handmade ceramics, natural imperfections, warm earth tones, linen' }
+  ],
+  decoration: [
+    { id: 'tropical-plants', label: 'Plantas Tropicales', desc: 'Monstera, palmeras, helechos, verde exuberante', prompt: 'lush tropical indoor plants, monstera deliciosa, areca palms, ferns, hanging pothos, living green walls' },
+    { id: 'minimalist-decor', label: 'Minimalista', desc: 'Pocos objetos, cada uno con proposito', prompt: 'minimalist decoration, few carefully chosen objects, negative space, single statement vase, clean surfaces' },
+    { id: 'artisan-crafts', label: 'Artesanal', desc: 'Ceramica hecha a mano, tejidos, madera tallada', prompt: 'artisan handcrafted decor, handmade ceramics, woven baskets, carved wood sculptures, natural fibers' },
+    { id: 'luxury-accents', label: 'Acentos de Lujo', desc: 'Dorado, marmol, cristal, terciopelo', prompt: 'luxury accent decor, gold fixtures, marble accessories, crystal vases, velvet cushions, silk curtains' },
+    { id: 'ocean-inspired', label: 'Inspiracion Marina', desc: 'Conchas, corales, tonos azules y arena', prompt: 'ocean inspired decor, seashells, coral arrangements, driftwood art, blue glass, sand tones, nautical rope' },
+    { id: 'modern-art', label: 'Arte Moderno', desc: 'Cuadros abstractos, esculturas, galeria', prompt: 'modern art decor, large abstract paintings, contemporary sculptures, gallery wall, artistic lighting' },
+    { id: 'vintage-eclectic', label: 'Vintage Eclectico', desc: 'Mezcla de epocas, piezas con historia', prompt: 'vintage eclectic decor, antique mirrors, retro lamps, mixed era furniture, patina brass, old books' },
+    { id: 'caribbean-local', label: 'Caribeño Local', desc: 'Arte dominicano, artesania taino, colores locales', prompt: 'Caribbean local decor, Dominican art, Taino inspired crafts, tropical colors, handwoven textiles, mahogany wood carvings' }
+  ],
+  materials: [
+    { id: 'marble-gold', label: 'Marmol + Dorado', desc: 'Calacatta, Carrara, herrajes dorados', prompt: 'Calacatta marble floors and countertops, brushed gold fixtures, Carrara marble bathroom, gold hardware' },
+    { id: 'wood-stone', label: 'Madera + Piedra', desc: 'Teca, roble, piedra natural, organico', prompt: 'natural teak wood floors, oak cabinetry, natural stone walls, organic materials, warm wood tones' },
+    { id: 'concrete-glass', label: 'Concreto + Vidrio', desc: 'Pulido, templado, industrial refinado', prompt: 'polished concrete floors, floor-to-ceiling tempered glass, exposed concrete walls, steel details' },
+    { id: 'tropical-materials', label: 'Tropicales', desc: 'Bambu, ratan, piedra coral, teca', prompt: 'bamboo accents, rattan furniture, coral stone walls, teak decking, palm thatch details, natural fibers' },
+    { id: 'porcelain-premium', label: 'Porcelanato Premium', desc: 'Gran formato, efecto madera o marmol', prompt: 'large format porcelain tile floors, wood-effect porcelain, marble-look porcelain, rectified edges, premium Italian tiles' },
+    { id: 'mixed-textures', label: 'Texturas Mixtas', desc: 'Ladrillo, madera, metal, textil', prompt: 'mixed material textures, exposed brick accent wall, reclaimed wood, black metal frames, textured fabrics, layered materials' }
   ],
   palette: [
-    { id: 'warm-earth', label: 'Tierra Cálida', colors: ['#8B6914', '#C4773B', '#D4A76A', '#F5E6CC', '#2C1810'], prompt: 'warm earth tone color palette, terracotta, sand, cream, dark wood' },
-    { id: 'ocean-breeze', label: 'Brisa Marina', colors: ['#1B4965', '#5FA8D3', '#BEE9E8', '#FFFFFF', '#CAD2C5'], prompt: 'ocean blue and white color palette, coastal, fresh, aquamarine accents' },
-    { id: 'monochrome', label: 'Monocromático', colors: ['#1a1a1a', '#333333', '#666666', '#cccccc', '#ffffff'], prompt: 'monochrome color palette, black white grey, sophisticated, high contrast' },
-    { id: 'tropical-vibrant', label: 'Tropical Vibrante', colors: ['#2D6A4F', '#52B788', '#F4A261', '#E76F51', '#264653'], prompt: 'vibrant tropical color palette, lush green, orange, coral, teal accents' },
-    { id: 'neutral-luxury', label: 'Neutro Lujoso', colors: ['#B8A898', '#D4C5B5', '#E8DDD3', '#F5F0EB', '#8C7B6B'], prompt: 'neutral luxury color palette, beige, taupe, cream, warm grey, gold accents' },
-    { id: 'bold-contemporary', label: 'Audaz Contemporáneo', colors: ['#000000', '#FFFFFF', '#C4773B', '#2C3E50', '#E74C3C'], prompt: 'bold contemporary palette, black, white, copper accents, deep blue, dramatic red' }
+    { id: 'warm-earth', label: 'Tierra Calida', colors: ['#8B6914', '#C4773B', '#D4A76A', '#F5E6CC', '#2C1810'], prompt: 'warm earth tones, terracotta, sand, cream, dark wood' },
+    { id: 'ocean-breeze', label: 'Brisa Marina', colors: ['#1B4965', '#5FA8D3', '#BEE9E8', '#FFFFFF', '#CAD2C5'], prompt: 'ocean blue and white, coastal, aquamarine accents' },
+    { id: 'monochrome', label: 'Monocromatico', colors: ['#1a1a1a', '#333333', '#666666', '#cccccc', '#ffffff'], prompt: 'monochrome palette, black white grey, sophisticated' },
+    { id: 'tropical-vibrant', label: 'Tropical Vibrante', colors: ['#2D6A4F', '#52B788', '#F4A261', '#E76F51', '#264653'], prompt: 'vibrant tropical colors, lush green, orange, coral, teal' },
+    { id: 'neutral-luxury', label: 'Neutro Lujoso', colors: ['#B8A898', '#D4C5B5', '#E8DDD3', '#F5F0EB', '#8C7B6B'], prompt: 'neutral luxury palette, beige, taupe, cream, warm grey, gold' },
+    { id: 'bold-contemporary', label: 'Audaz', colors: ['#000000', '#FFFFFF', '#C4773B', '#2C3E50', '#E74C3C'], prompt: 'bold contemporary, black, white, copper, deep blue, red' },
+    { id: 'sage-blush', label: 'Sage + Blush', colors: ['#87A878', '#D4C5B0', '#E8C4C4', '#F5E6D8', '#4A5D3E'], prompt: 'sage green and blush pink palette, soft natural tones, feminine elegant' },
+    { id: 'midnight-gold', label: 'Midnight + Gold', colors: ['#0D1117', '#1a1a2e', '#C4773B', '#D4A76A', '#F5E6CC'], prompt: 'midnight dark blue and gold palette, dramatic luxury, dark moody, gold accents' },
+    { id: 'all-white', label: 'Total White', colors: ['#FFFFFF', '#F5F5F5', '#EEEEEE', '#E0E0E0', '#FAFAFA'], prompt: 'all white interior palette, pure white, off-white, ivory, bright clean minimal' },
+    { id: 'terracotta', label: 'Terracotta', colors: ['#C4773B', '#A0522D', '#D2691E', '#DEB887', '#F5DEB3'], prompt: 'terracotta color palette, burnt orange, sienna, warm clay, desert tones' }
   ],
   lighting: [
-    { id: 'golden-hour', label: 'Hora Dorada', desc: 'Atardecer cálido, sombras largas', prompt: 'golden hour warm lighting, long shadows, orange sun glow, magic hour photography' },
-    { id: 'bright-midday', label: 'Mediodía Brillante', desc: 'Luz natural intensa, cielos azules', prompt: 'bright midday natural light, blue sky, strong shadows, vivid colors, sharp details' },
-    { id: 'overcast-soft', label: 'Nublado Suave', desc: 'Luz difusa, sin sombras duras', prompt: 'overcast soft diffused lighting, no harsh shadows, even illumination, professional photography lighting' },
-    { id: 'twilight', label: 'Crepúsculo', desc: 'Luces interiores encendidas, cielo azul oscuro', prompt: 'twilight blue hour, interior lights glowing warmly, dark blue sky, architectural lighting, dramatic mood' },
-    { id: 'tropical-morning', label: 'Mañana Tropical', desc: 'Luz fresca, verde brillante, rocío', prompt: 'tropical morning light, fresh dewy atmosphere, bright green vegetation, cool shadows, clear sky' }
+    { id: 'golden-hour', label: 'Hora Dorada', desc: 'Atardecer calido, sombras largas', prompt: 'golden hour warm lighting, long shadows, orange sun glow, magic hour' },
+    { id: 'bright-midday', label: 'Mediodia', desc: 'Luz intensa, cielos azules', prompt: 'bright midday natural light, blue sky, vivid colors, sharp details' },
+    { id: 'overcast-soft', label: 'Nublado Suave', desc: 'Luz difusa, sin sombras duras', prompt: 'overcast soft diffused lighting, even illumination, professional photography' },
+    { id: 'twilight', label: 'Crepusculo', desc: 'Luces interiores, cielo azul oscuro', prompt: 'twilight blue hour, interior lights glowing, dark blue sky, dramatic mood' },
+    { id: 'tropical-morning', label: 'Manana Tropical', desc: 'Luz fresca, verde brillante', prompt: 'tropical morning light, fresh atmosphere, bright green, cool shadows' },
+    { id: 'dramatic-night', label: 'Noche Dramatica', desc: 'Iluminacion arquitectonica, piscina iluminada', prompt: 'dramatic night architecture lighting, illuminated pool, uplighting, stars, warm interior glow' },
+    { id: 'studio-light', label: 'Estudio', desc: 'Iluminacion profesional perfecta', prompt: 'professional studio lighting, perfectly balanced, no harsh shadows, magazine quality, editorial' }
   ]
 };
 
@@ -5734,6 +5791,26 @@ function openStyleWizard() {
     </div>`
   ).join('');
 
+  // Render decoration cards
+  document.getElementById('sw-decor-grid').innerHTML = STYLE_OPTIONS.decoration.map(s =>
+    `<div class="sw-card" onclick="selectStyleOption(this,'decoration','${s.id}')">
+      <div style="padding:10px">
+        <div class="sw-card-label" style="padding:0;font-size:12px">${s.label}</div>
+        <div class="sw-card-desc" style="padding:2px 0 0">${s.desc}</div>
+      </div>
+    </div>`
+  ).join('');
+
+  // Render materials cards
+  document.getElementById('sw-materials-grid').innerHTML = STYLE_OPTIONS.materials.map(s =>
+    `<div class="sw-card" onclick="selectStyleOption(this,'materials','${s.id}')">
+      <div style="padding:10px">
+        <div class="sw-card-label" style="padding:0;font-size:12px">${s.label}</div>
+        <div class="sw-card-desc" style="padding:2px 0 0">${s.desc}</div>
+      </div>
+    </div>`
+  ).join('');
+
   // Render palette cards
   document.getElementById('sw-palette-grid').innerHTML = STYLE_OPTIONS.palette.map(s =>
     `<div class="sw-card" data-cat="palette" data-id="${s.id}" onclick="selectStyleOption(this,'palette','${s.id}')">
@@ -5791,23 +5868,35 @@ function updateWizardSummary() {
     : 'Selecciona opciones arriba para definir el ADN visual de tu proyecto';
 }
 
+function updateCustomPalette() {}
+
+function applyCustomPalette() {
+  var colors = [];
+  document.querySelectorAll('.sw-color-pick').forEach(function(input) {
+    colors.push(input.value);
+  });
+  // Deselect preset palettes
+  document.querySelectorAll('#sw-palette-grid .sw-card').forEach(function(c) { c.classList.remove('selected'); });
+  __wizardSelection.palette = 'custom';
+  __wizardSelection.customColors = colors;
+  updateWizardSummary();
+  showToast('Colores personalizados aplicados');
+}
+
 function getStylePromptDNA() {
-  const parts = [];
-  if (__wizardSelection.architecture) {
-    const s = STYLE_OPTIONS.architecture.find(o => o.id === __wizardSelection.architecture);
-    if (s) parts.push(s.prompt);
-  }
-  if (__wizardSelection.interior) {
-    const s = STYLE_OPTIONS.interior.find(o => o.id === __wizardSelection.interior);
-    if (s) parts.push(s.prompt);
-  }
-  if (__wizardSelection.palette) {
-    const s = STYLE_OPTIONS.palette.find(o => o.id === __wizardSelection.palette);
-    if (s) parts.push(s.prompt);
-  }
-  if (__wizardSelection.lighting) {
-    const s = STYLE_OPTIONS.lighting.find(o => o.id === __wizardSelection.lighting);
-    if (s) parts.push(s.prompt);
+  var parts = [];
+  ['architecture', 'interior', 'decoration', 'materials', 'palette', 'lighting'].forEach(function(cat) {
+    if (__wizardSelection[cat]) {
+      var list = STYLE_OPTIONS[cat];
+      if (list) {
+        var s = list.find(function(o) { return o.id === __wizardSelection[cat]; });
+        if (s) parts.push(s.prompt);
+      }
+    }
+  });
+  // Custom colors
+  if (__wizardSelection.palette === 'custom' && __wizardSelection.customColors) {
+    parts.push('color palette: ' + __wizardSelection.customColors.join(', '));
   }
   return parts.join(', ');
 }
