@@ -5536,31 +5536,58 @@ async function runSwarm(projectInfo) {
   const planSrc = state.__currentPlanSrc || (uploadedImages.length > 0 ? uploadedImages[0].image_url?.url : null);
 
   if (planSrc || state.__planAnalysis) {
-    swarmLog('Coordinator', 'Fase 0: Analizando planos con vision AI para renders precisos...');
-    if (!state.__planAnalysis && planSrc) {
+    swarmLog('Coordinator', 'Fase 0: Leyendo planos para generar renders fieles...');
+
+    if (!state.__planRenderDescriptions && planSrc) {
       try {
         var visionModel = (state.freeModels || []).find(function(m) { return /vl|vision/i.test(m); }) || 'qwen/qwen-2.5-vl-72b-instruct:free';
-        var analysisResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST', signal: AbortSignal.timeout(60000),
+
+        // Step 1: Get the AI to describe EACH space for rendering
+        var descResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST', signal: AbortSignal.timeout(90000),
           headers: { 'Authorization': 'Bearer ' + state.orKey, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBuilder' },
           body: JSON.stringify({
             model: visionModel,
             messages: [{ role: 'user', content: [
               { type: 'image_url', image_url: { url: planSrc } },
-              { type: 'text', text: 'Analyze this architectural plan in detail. List: 1) All unit names/codes (E-1, E-2, etc), 2) Number of bedrooms/bathrooms per unit, 3) Common areas (pool, parking, lobby), 4) Approximate dimensions visible, 5) Architectural style visible, 6) Number of floors. Be specific and concise. Respond in English.' }
+              { type: 'text', text: `You are an expert architectural renderer. Study this floor plan carefully.
+
+For EACH distinct space you can identify (each unit, each common area, each outdoor area), write a DETAILED render description that a 3D artist would use to create a photorealistic image.
+
+Format your response as a JSON array:
+[
+  {"space": "E-1 Living Room", "render_prompt": "Open plan living room approximately 5x4m, large window on north wall facing garden, connected to kitchen on the east side, tile flooring, 2.7m ceiling height, modern furniture arrangement with L-shaped sofa facing window"},
+  {"space": "Pool Area", "render_prompt": "Rectangular pool 8x4m centered in courtyard, surrounded by concrete deck, lounge chairs on south side, tropical landscaping with palm trees, overlooked by unit balconies"},
+  ...
+]
+
+Include: exact dimensions you can read, orientation, what each space connects to, what views it has, furniture placement logic. Be SPECIFIC to THIS plan, not generic. List 15-30 spaces.` }
             ]}]
           })
         });
-        if (analysisResp.ok) {
-          var analysisData = await analysisResp.json();
-          state.__planAnalysis = analysisData.choices?.[0]?.message?.content || '';
-          swarmLog('Coordinator', 'Plano analizado: ' + state.__planAnalysis.slice(0, 150) + '...');
+
+        if (descResp.ok) {
+          var descData = await descResp.json();
+          var descText = descData.choices?.[0]?.message?.content || '';
+
+          // Parse JSON from response
+          var jsonMatch = descText.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            try {
+              state.__planRenderDescriptions = JSON.parse(jsonMatch[0]);
+              swarmLog('Coordinator', 'Plano interpretado: ' + state.__planRenderDescriptions.length + ' espacios identificados');
+            } catch(e) {
+              swarmLog('Coordinator', 'Error parseando descripciones, usando texto directo');
+              state.__planAnalysis = descText;
+            }
+          } else {
+            state.__planAnalysis = descText;
+            swarmLog('Coordinator', 'Plano analizado en texto libre');
+          }
         }
       } catch(e) {
-        swarmLog('Coordinator', 'Vision AI no disponible, usando prompts genericos');
+        swarmLog('Coordinator', 'Vision AI error: ' + e.message);
       }
-    } else if (state.__planAnalysis) {
-      swarmLog('Coordinator', 'Usando analisis previo del plano');
     }
   }
 
@@ -5568,23 +5595,33 @@ async function runSwarm(projectInfo) {
   const renderAgents = swarmState.agents.filter(a => a.taskFn === 'render');
   const otherAgents = swarmState.agents.filter(a => a.taskFn !== 'render');
 
-  // REWRITE render prompts using plan analysis — not append, REPLACE
-  if (state.__planAnalysis) {
+  // REWRITE render prompts with plan-specific descriptions
+  if (state.__planRenderDescriptions && state.__planRenderDescriptions.length > 0) {
+    var descriptions = state.__planRenderDescriptions;
+    var dna = state.__styleDNA || '';
+    var loc = projectInfo.location || '';
+    var projName = projectInfo.name || '';
+
+    renderAgents.forEach(function(agent, i) {
+      // Match agent to a plan description or cycle through them
+      var desc = descriptions[i % descriptions.length];
+      if (desc && desc.render_prompt) {
+        agent.task = desc.space || agent.task;
+        agent.prompt = projName + ' in ' + loc + ', ' + desc.space + ': ' + desc.render_prompt + ', ' + dna + ', photorealistic architectural render, 8K, cinematic lighting, no text no watermark';
+      }
+    });
+    swarmLog('Coordinator', renderAgents.length + ' renders reescritos con descripciones especificas del plano');
+  } else if (state.__planAnalysis) {
     var analysis = state.__planAnalysis;
     renderAgents.forEach(function(agent) {
       if (!agent.prompt) return;
-      // Build a prompt that STARTS with the plan context
       var task = agent.task || '';
       var dna = state.__styleDNA || '';
       var loc = projectInfo.location || '';
       var projName = projectInfo.name || '';
-      agent.prompt = projName + ' in ' + loc + ', ' + task + ', ' +
-        'this is a REAL project with this floor plan: ' + analysis.slice(0, 300) + ', ' +
-        dna + ', ' +
-        'photorealistic architectural render matching the actual floor plan layout, ' +
-        '8K, cinematic lighting, no text no watermark';
+      agent.prompt = projName + ' in ' + loc + ', ' + task + ', based on floor plan: ' + analysis.slice(0, 300) + ', ' + dna + ', photorealistic, 8K, cinematic lighting, no text no watermark';
     });
-    swarmLog('Coordinator', 'Prompts reescritos con datos del plano real para ' + renderAgents.length + ' renders');
+    swarmLog('Coordinator', 'Prompts enriquecidos con analisis del plano');
   }
 
   // Phase 1: Run all non-render agents fast (batches of 15)
