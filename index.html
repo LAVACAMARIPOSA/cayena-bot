@@ -1249,10 +1249,20 @@ function deleteProject(idx) {
       <div style="position:absolute;top:14px;left:14px;z-index:25;display:flex;gap:3px;background:rgba(0,0,0,0.5);border-radius:8px;padding:3px;backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.08)">
         <button id="tour-mode-360" onclick="setTourMode('360')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(255,255,255,0.15);color:#fff;border:none;transition:all 0.15s">360</button>
         <button id="tour-mode-flat" onclick="setTourMode('flat')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Galeria</button>
+        <button id="tour-mode-dollhouse" onclick="setTourMode('dollhouse')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">3D</button>
+        <button id="tour-mode-walk" onclick="setTourMode('walk')" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Walk</button>
         <button onclick="openCameraCapture()" style="padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:rgba(255,255,255,0.5);border:none;transition:all 0.15s">Capturar</button>
       </div>
       <!-- Photo Sphere Viewer container -->
       <div id="psv-container" style="position:absolute;inset:0;z-index:1;display:none"></div>
+      <!-- 3D Dollhouse / Walkthrough container -->
+      <div id="dollhouse-container" style="position:absolute;inset:0;z-index:1;display:none">
+        <canvas id="dollhouse-canvas" style="width:100%;height:100%"></canvas>
+        <div id="dollhouse-info" style="position:absolute;bottom:16px;left:16px;font-size:11px;color:rgba(255,255,255,0.6);pointer-events:none"></div>
+        <div id="walk-instructions" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:#fff;padding:20px 30px;border-radius:12px;font-size:14px;text-align:center;display:none;z-index:30">
+          Click para entrar<br><small style="color:var(--gold)">WASD = mover | Mouse = mirar | ESC = salir</small>
+        </div>
+      </div>
 
       <!-- Minimap dots -->
       <div id="minimap"></div>
@@ -3084,30 +3094,393 @@ function setTourMode(mode) {
   const flatViewer = document.getElementById('tour-flat-viewer');
   const pannContainer = document.getElementById('pannellum-container');
   const psvContainer = document.getElementById('psv-container');
-  const btnFlat = document.getElementById('tour-mode-flat');
-  const btn360 = document.getElementById('tour-mode-360');
-  const btnPsv = document.getElementById('tour-mode-psv');
-  const inactiveStyle = 'rgba(0,0,0,0.5)';
+  const dollhouseContainer = document.getElementById('dollhouse-container');
+  const allBtns = ['tour-mode-flat', 'tour-mode-360', 'tour-mode-psv', 'tour-mode-dollhouse', 'tour-mode-walk'];
 
   // Reset all
-  [flatViewer, pannContainer, psvContainer].forEach(el => { if(el) el.style.display = 'none'; });
-  [btnFlat, btn360, btnPsv].forEach(btn => {
-    if(btn) { btn.style.background = 'transparent'; btn.style.color = 'rgba(255,255,255,0.5)'; btn.style.border = 'none'; }
+  [flatViewer, pannContainer, psvContainer, dollhouseContainer].forEach(el => { if(el) el.style.display = 'none'; });
+  allBtns.forEach(id => {
+    const btn = document.getElementById(id);
+    if(btn) { btn.style.background = 'transparent'; btn.style.color = 'rgba(255,255,255,0.5)'; }
   });
+  // Exit pointer lock if leaving walk mode
+  if (mode !== 'walk' && document.pointerLockElement) document.exitPointerLock();
+  const walkInstr = document.getElementById('walk-instructions');
+  if (walkInstr) walkInstr.style.display = 'none';
 
   if (mode === 'flat') {
     flatViewer.style.display = 'flex';
-    btnFlat.style.background = 'rgba(255,255,255,0.15)'; btnFlat.style.color = '#fff';
+    const btn = document.getElementById('tour-mode-flat');
+    if (btn) { btn.style.background = 'rgba(255,255,255,0.15)'; btn.style.color = '#fff'; }
     updateFlatTour();
   } else if (mode === 'psv') {
-    psvContainer.style.display = '';
-    btnPsv.style.background = 'rgba(255,255,255,0.15)'; btnPsv.style.color = '#fff';
+    if (psvContainer) psvContainer.style.display = '';
+    const btn = document.getElementById('tour-mode-psv');
+    if (btn) { btn.style.background = 'rgba(255,255,255,0.15)'; btn.style.color = '#fff'; }
     if (!__psvViewer) initPSVTour();
+  } else if (mode === 'dollhouse' || mode === 'walk') {
+    // === FIDELIDAD PLANO v3 === 3D Dollhouse + Walk mode
+    if (dollhouseContainer) dollhouseContainer.style.display = '';
+    const btnId = mode === 'dollhouse' ? 'tour-mode-dollhouse' : 'tour-mode-walk';
+    const btn = document.getElementById(btnId);
+    if (btn) { btn.style.background = 'rgba(255,255,255,0.15)'; btn.style.color = '#fff'; }
+    initDollhouse3D(mode === 'walk');
   } else {
     pannContainer.style.display = '';
-    btn360.style.background = 'rgba(255,255,255,0.15)'; btn360.style.color = '#fff';
+    const btn = document.getElementById('tour-mode-360');
+    if (btn) { btn.style.background = 'rgba(255,255,255,0.15)'; btn.style.color = '#fff'; }
     if (!__pannellumViewer) initPannellumTour();
   }
+}
+
+// =============================================================================
+// === FIDELIDAD PLANO v3 === 3D DOLLHOUSE + FIRST-PERSON WALKTHROUGH ENGINE
+// =============================================================================
+let __dhScene, __dhCamera, __dhRenderer, __dhControls, __dhAnimId;
+let __dhWalkMode = false, __dhYaw = 0, __dhPitch = 0;
+const __dhKeys = {};
+const __DH_WALL_H = 2.8, __DH_SCALE = 0.05, __DH_EYE_H = 1.6;
+
+// Procedural textures (from FloorAI patterns)
+function __makeCanvasTexture(w, h, drawFn) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  drawFn(c.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+function __floorTex() {
+  return __makeCanvasTexture(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#e8dcc8'; ctx.fillRect(0, 0, w, h);
+    const tileSize = 64;
+    for (let x = 0; x < w; x += tileSize) for (let y = 0; y < h; y += tileSize) {
+      ctx.fillStyle = (x/tileSize + y/tileSize) % 2 === 0 ? '#e0d4be' : '#ece2ce';
+      ctx.fillRect(x+1, y+1, tileSize-2, tileSize-2);
+      ctx.strokeStyle = '#c8bca4'; ctx.lineWidth = 0.5;
+      ctx.strokeRect(x, y, tileSize, tileSize);
+    }
+  });
+}
+function __wallTex() {
+  return __makeCanvasTexture(128, 128, (ctx, w, h) => {
+    ctx.fillStyle = '#f5f0e8'; ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = `rgba(${200+Math.random()*30},${190+Math.random()*30},${175+Math.random()*30},0.3)`;
+      ctx.fillRect(Math.random()*w, Math.random()*h, Math.random()*20+2, Math.random()*3+1);
+    }
+  });
+}
+
+function initDollhouse3D(walkMode) {
+  const container = document.getElementById('dollhouse-container');
+  const canvas = document.getElementById('dollhouse-canvas');
+  if (!container || !canvas || typeof THREE === 'undefined') return;
+
+  // Get rooms from plan data
+  const rooms = state.__planRoomsJSON || state.__planRenderDescriptions || [];
+  if (rooms.length === 0) {
+    document.getElementById('dollhouse-info').textContent = 'Sube un plano primero para ver el modelo 3D';
+    return;
+  }
+
+  // Clean up previous
+  if (__dhAnimId) cancelAnimationFrame(__dhAnimId);
+  if (__dhRenderer) __dhRenderer.dispose();
+
+  const W = container.clientWidth || 800, H = container.clientHeight || 600;
+  canvas.width = W; canvas.height = H;
+
+  // Scene
+  __dhScene = new THREE.Scene();
+  __dhScene.background = new THREE.Color(walkMode ? 0x87CEEB : 0x1a1a2e);
+  if (walkMode) __dhScene.fog = new THREE.FogExp2(0x87CEEB, 0.015);
+
+  // Renderer
+  __dhRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  __dhRenderer.setSize(W, H);
+  __dhRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  __dhRenderer.shadowMap.enabled = true;
+  __dhRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  __dhRenderer.toneMappingExposure = 1.2;
+
+  // Camera
+  __dhWalkMode = walkMode;
+  if (walkMode) {
+    __dhCamera = new THREE.PerspectiveCamera(75, W/H, 0.05, 100);
+    __dhCamera.position.set(2, __DH_EYE_H, 2);
+    __dhYaw = 0; __dhPitch = 0;
+  } else {
+    __dhCamera = new THREE.PerspectiveCamera(50, W/H, 0.1, 500);
+    __dhCamera.position.set(15, 18, 15);
+    __dhCamera.lookAt(0, 0, 0);
+  }
+
+  // Lighting
+  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  __dhScene.add(ambient);
+  const sun = new THREE.DirectionalLight(0xfff5e0, 2.0);
+  sun.position.set(10, 15, 8);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  __dhScene.add(sun);
+  const fill = new THREE.DirectionalLight(0xe0e8ff, 0.5);
+  fill.position.set(-5, 8, -5);
+  __dhScene.add(fill);
+  const hemi = new THREE.HemisphereLight(0x87CEEB, 0x3a2f1f, 0.4);
+  __dhScene.add(hemi);
+
+  // Materials
+  const floorMat = new THREE.MeshStandardMaterial({ map: __floorTex(), roughness: 0.4 });
+  const wallMat = new THREE.MeshStandardMaterial({ map: __wallTex(), roughness: 0.7, side: THREE.DoubleSide });
+  const ceilMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, side: THREE.BackSide });
+
+  // Build rooms from bbox data
+  const PLAN_W = 30, PLAN_D = 20; // meters total plan dimensions
+  rooms.forEach((room, i) => {
+    const bbox = room.bbox || {};
+    const bx = (bbox.x || (i * 15) % 80) / 100;
+    const by = (bbox.y || Math.floor(i / 5) * 20) / 100;
+    const bw = (bbox.width || bbox.w || 20) / 100;
+    const bh = (bbox.height || bbox.h || 20) / 100;
+
+    const rx = bx * PLAN_W - PLAN_W / 2;
+    const rz = by * PLAN_D - PLAN_D / 2;
+    const rw = bw * PLAN_W;
+    const rd = bh * PLAN_D;
+    const wallThick = 0.12;
+
+    // Floor
+    const floorGeo = new THREE.BoxGeometry(rw, 0.1, rd);
+    const floor = new THREE.Mesh(floorGeo, floorMat.clone());
+    floor.position.set(rx + rw/2, 0, rz + rd/2);
+    floor.receiveShadow = true;
+    __dhScene.add(floor);
+
+    // Ceiling (only in walk mode)
+    if (walkMode) {
+      const ceilGeo = new THREE.BoxGeometry(rw, 0.08, rd);
+      const ceil = new THREE.Mesh(ceilGeo, ceilMat);
+      ceil.position.set(rx + rw/2, __DH_WALL_H, rz + rd/2);
+      __dhScene.add(ceil);
+    }
+
+    // Room light
+    const light = new THREE.PointLight(0xfff0d0, walkMode ? 1.5 : 0.8, rw * 3);
+    light.position.set(rx + rw/2, __DH_WALL_H - 0.3, rz + rd/2);
+    __dhScene.add(light);
+
+    // Walls — check room data for doors/windows per wall
+    const wallN = room.wall_north || '';
+    const wallS = room.wall_south || '';
+    const wallE = room.wall_east || '';
+    const wallW = room.wall_west || '';
+
+    function addWall(x, z, w, h, rotY, wallDesc) {
+      const hasDoor = /puerta|door|acceso|entrada|abertura|opening/i.test(wallDesc);
+      const hasWindow = /ventana|window|ventanal|vidrio|glass/i.test(wallDesc);
+      const isOpen = /abierto|open|sin\s*muro|no\s*wall/i.test(wallDesc);
+      if (isOpen) return; // Skip open walls
+
+      if (hasDoor || hasWindow) {
+        // Wall with hole — use Shape geometry
+        const shape = new THREE.Shape();
+        shape.moveTo(0, 0); shape.lineTo(w, 0); shape.lineTo(w, __DH_WALL_H);
+        shape.lineTo(0, __DH_WALL_H); shape.closePath();
+
+        if (hasDoor) {
+          const doorW = 0.9, doorH = 2.1;
+          const dx = w * 0.3;
+          const hole = new THREE.Path();
+          hole.moveTo(dx, 0); hole.lineTo(dx + doorW, 0);
+          hole.lineTo(dx + doorW, doorH); hole.lineTo(dx, doorH); hole.closePath();
+          shape.holes.push(hole);
+        }
+        if (hasWindow) {
+          const winW = Math.min(w * 0.5, 1.5), winH = 1.2;
+          const wx = hasDoor ? w * 0.65 : w * 0.3;
+          const wy = 0.9;
+          const hole = new THREE.Path();
+          hole.moveTo(wx, wy); hole.lineTo(wx + winW, wy);
+          hole.lineTo(wx + winW, wy + winH); hole.lineTo(wx, wy + winH); hole.closePath();
+          shape.holes.push(hole);
+        }
+
+        const geo = new THREE.ShapeGeometry(shape);
+        const wall = new THREE.Mesh(geo, wallMat.clone());
+        wall.position.set(x, 0, z);
+        wall.rotation.y = rotY;
+        wall.castShadow = true;
+        __dhScene.add(wall);
+      } else {
+        // Solid wall — simple box
+        const geo = new THREE.BoxGeometry(w, __DH_WALL_H, wallThick);
+        const wall = new THREE.Mesh(geo, wallMat.clone());
+        wall.position.set(x, __DH_WALL_H/2, z);
+        wall.rotation.y = rotY;
+        wall.castShadow = true;
+        __dhScene.add(wall);
+      }
+    }
+
+    // North wall (back, z = rz)
+    addWall(rx + rw/2, rz, rw, __DH_WALL_H, 0, wallN);
+    // South wall (front, z = rz + rd)
+    addWall(rx + rw/2, rz + rd, rw, __DH_WALL_H, 0, wallS);
+    // East wall (right, x = rx + rw)
+    addWall(rx + rw, rz + rd/2, rd, __DH_WALL_H, Math.PI/2, wallE);
+    // West wall (left, x = rx)
+    addWall(rx, rz + rd/2, rd, __DH_WALL_H, Math.PI/2, wallW);
+
+    // Room label (dollhouse mode only)
+    if (!walkMode) {
+      const labelCanvas = document.createElement('canvas');
+      labelCanvas.width = 256; labelCanvas.height = 64;
+      const lctx = labelCanvas.getContext('2d');
+      lctx.fillStyle = 'rgba(0,0,0,0.6)'; lctx.fillRect(0, 0, 256, 64);
+      lctx.fillStyle = '#fff'; lctx.font = 'bold 20px sans-serif'; lctx.textAlign = 'center';
+      lctx.fillText((room.code || '') + ' ' + (room.name || room.space || ''), 128, 25);
+      lctx.fillStyle = '#c4773b'; lctx.font = '14px sans-serif';
+      lctx.fillText(room.estimated_dimensions || room.dimensions || '', 128, 48);
+      const labelTex = new THREE.CanvasTexture(labelCanvas);
+      const labelMat = new THREE.SpriteMaterial({ map: labelTex, transparent: true });
+      const sprite = new THREE.Sprite(labelMat);
+      sprite.position.set(rx + rw/2, __DH_WALL_H + 0.5, rz + rd/2);
+      sprite.scale.set(rw * 0.8, rw * 0.2, 1);
+      __dhScene.add(sprite);
+    }
+
+    // Simple furniture based on room type
+    const roomName = (room.name || room.space || '').toLowerCase();
+    if (/sala|living|comedor|dining/i.test(roomName)) {
+      // Sofa
+      const sofaGeo = new THREE.BoxGeometry(1.8, 0.5, 0.7);
+      const sofa = new THREE.Mesh(sofaGeo, new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.8 }));
+      sofa.position.set(rx + rw*0.3, 0.35, rz + rd*0.7);
+      __dhScene.add(sofa);
+      // Backrest
+      const backGeo = new THREE.BoxGeometry(1.8, 0.4, 0.12);
+      const back = new THREE.Mesh(backGeo, new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.8 }));
+      back.position.set(rx + rw*0.3, 0.7, rz + rd*0.7 + 0.3);
+      __dhScene.add(back);
+    }
+    if (/dormitorio|bedroom|master|habitacion|recamara/i.test(roomName)) {
+      // Bed
+      const bedGeo = new THREE.BoxGeometry(1.6, 0.35, 2.0);
+      const bed = new THREE.Mesh(bedGeo, new THREE.MeshStandardMaterial({ color: 0xf0e6d2, roughness: 0.6 }));
+      bed.position.set(rx + rw*0.5, 0.25, rz + rd*0.5);
+      __dhScene.add(bed);
+      // Headboard
+      const headGeo = new THREE.BoxGeometry(1.6, 0.6, 0.08);
+      const head = new THREE.Mesh(headGeo, new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 0.7 }));
+      head.position.set(rx + rw*0.5, 0.6, rz + rd*0.5 - 1.0);
+      __dhScene.add(head);
+    }
+    if (/cocina|kitchen/i.test(roomName)) {
+      // Counter
+      const counterGeo = new THREE.BoxGeometry(rw*0.6, 0.9, 0.6);
+      const counter = new THREE.Mesh(counterGeo, new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.3 }));
+      counter.position.set(rx + rw*0.35, 0.45, rz + 0.4);
+      __dhScene.add(counter);
+    }
+    if (/baño|bathroom|wc/i.test(roomName)) {
+      // Bathtub
+      const tubGeo = new THREE.BoxGeometry(0.7, 0.5, 1.5);
+      const tub = new THREE.Mesh(tubGeo, new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.2 }));
+      tub.position.set(rx + rw*0.7, 0.25, rz + rd*0.4);
+      __dhScene.add(tub);
+    }
+  });
+
+  // Ground plane
+  const groundGeo = new THREE.PlaneGeometry(100, 100);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x3a6b35, roughness: 0.9 });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI/2; ground.position.y = -0.05;
+  ground.receiveShadow = true;
+  __dhScene.add(ground);
+
+  // Orbit controls for dollhouse mode
+  if (!walkMode) {
+    // Simple orbit via mouse drag
+    let isDragging = false, prevX = 0, prevY = 0;
+    let orbitTheta = Math.PI/4, orbitPhi = Math.PI/4, orbitDist = 25;
+    function updateOrbitCamera() {
+      __dhCamera.position.x = orbitDist * Math.sin(orbitPhi) * Math.cos(orbitTheta);
+      __dhCamera.position.y = orbitDist * Math.cos(orbitPhi);
+      __dhCamera.position.z = orbitDist * Math.sin(orbitPhi) * Math.sin(orbitTheta);
+      __dhCamera.lookAt(0, 1, 0);
+    }
+    updateOrbitCamera();
+    canvas.addEventListener('mousedown', e => { isDragging = true; prevX = e.clientX; prevY = e.clientY; });
+    canvas.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      orbitTheta += (e.clientX - prevX) * 0.01;
+      orbitPhi = Math.max(0.1, Math.min(Math.PI/2 - 0.05, orbitPhi - (e.clientY - prevY) * 0.01));
+      prevX = e.clientX; prevY = e.clientY;
+      updateOrbitCamera();
+    });
+    canvas.addEventListener('mouseup', () => isDragging = false);
+    canvas.addEventListener('mouseleave', () => isDragging = false);
+    canvas.addEventListener('wheel', e => {
+      orbitDist = Math.max(5, Math.min(60, orbitDist + e.deltaY * 0.02));
+      updateOrbitCamera();
+    });
+  }
+
+  // Walk mode controls (FloorCraft pattern: Pointer Lock + WASD)
+  if (walkMode) {
+    const walkInstr = document.getElementById('walk-instructions');
+    if (walkInstr) walkInstr.style.display = '';
+    canvas.addEventListener('click', () => {
+      canvas.requestPointerLock();
+    });
+    document.addEventListener('pointerlockchange', () => {
+      const walkInstr = document.getElementById('walk-instructions');
+      if (document.pointerLockElement === canvas) {
+        if (walkInstr) walkInstr.style.display = 'none';
+      } else {
+        if (walkInstr && __tourMode === 'walk') walkInstr.style.display = '';
+      }
+    });
+    document.addEventListener('mousemove', e => {
+      if (document.pointerLockElement !== canvas) return;
+      __dhYaw -= e.movementX * 0.0022;
+      __dhPitch = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, __dhPitch - e.movementY * 0.0022));
+    });
+    window.addEventListener('keydown', e => { __dhKeys[e.code] = true; });
+    window.addEventListener('keyup', e => { __dhKeys[e.code] = false; });
+  }
+
+  // Animation loop
+  const clock = new THREE.Clock();
+  function animate() {
+    __dhAnimId = requestAnimationFrame(animate);
+    if (!container.offsetParent) return; // Skip if hidden
+
+    // Walk mode movement
+    if (__dhWalkMode && document.pointerLockElement === canvas) {
+      const dt = Math.min(clock.getDelta(), 0.1);
+      const speed = 4.0 * dt;
+      const fwd = new THREE.Vector3(-Math.sin(__dhYaw), 0, -Math.cos(__dhYaw));
+      const right = new THREE.Vector3(Math.cos(__dhYaw), 0, -Math.sin(__dhYaw));
+
+      if (__dhKeys['KeyW'] || __dhKeys['ArrowUp']) __dhCamera.position.addScaledVector(fwd, speed);
+      if (__dhKeys['KeyS'] || __dhKeys['ArrowDown']) __dhCamera.position.addScaledVector(fwd, -speed);
+      if (__dhKeys['KeyA'] || __dhKeys['ArrowLeft']) __dhCamera.position.addScaledVector(right, -speed);
+      if (__dhKeys['KeyD'] || __dhKeys['ArrowRight']) __dhCamera.position.addScaledVector(right, speed);
+
+      __dhCamera.position.y = __DH_EYE_H;
+      __dhCamera.quaternion.setFromEuler(new THREE.Euler(__dhPitch, __dhYaw, 0, 'YXZ'));
+    } else {
+      clock.getDelta(); // consume delta
+    }
+
+    __dhRenderer.render(__dhScene, __dhCamera);
+  }
+  animate();
+
+  const info = document.getElementById('dollhouse-info');
+  if (info) info.textContent = `${rooms.length} espacios del plano | ${walkMode ? 'WASD para caminar' : 'Arrastra para rotar, scroll para zoom'}`;
 }
 
 function updateFlatTour() {
@@ -4584,8 +4957,8 @@ CRITICAL FIDELITY RULES:
 - Do NOT add extra rooms, walls, windows, or doors not in the plan
 - Do NOT change the aspect ratio or shape of the room
 
-STYLE: Photorealistic, warm natural lighting, luxury materials, 8K quality, Architectural Digest.
-NEGATIVE: ${__FAITHFUL_NEGATIVE}
+STYLE: Photorealistic architectural visualization, high-end interior design, 8K render, dramatic natural lighting, professional photography, luxury materials, marble floors, premium fixtures, warm golden hour atmosphere, Architectural Digest quality.
+NEGATIVE: ${__FAITHFUL_NEGATIVE}, ugly, smearing, melting, overexposed, dark, furniture missing
 
 SPECIFIC VIEW: ${prompt}` });
       } else {
