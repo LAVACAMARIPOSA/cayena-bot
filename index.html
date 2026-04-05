@@ -4490,6 +4490,34 @@ async function generateImage(prompt, opts = {}) {
       });
     }
 
+    // Provider 0.3: ControlNet (uses plan as spatial guide — best for plan-accurate renders)
+    var controlRef = opts.planCropSrc || state.__currentPlanSrc;
+    if (hfKey && controlRef) {
+      providers.push(async () => {
+        // Extract base64 data from data URL
+        var b64 = controlRef.split(',')[1] || controlRef;
+        var resp = await fetch('https://api-inference.huggingface.co/models/lllyasviel/control_v11p_sd15_scribble', {
+          method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
+          headers: { 'Authorization': 'Bearer ' + hfKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inputs: b64,
+            parameters: {
+              prompt: 'photorealistic luxury interior architectural render, ' + prompt + ', 8K, professional CGI, no people',
+              negative_prompt: 'blurry, cartoon, low quality, text, watermark, different layout, extra rooms',
+              num_inference_steps: 20,
+              guidance_scale: 7.5,
+              controlnet_conditioning_scale: 0.8
+            }
+          })
+        });
+        if (!resp.ok) throw new Error('ControlNet HTTP ' + resp.status);
+        var blob = await resp.blob();
+        if (blob.size < 5000) throw new Error('ControlNet too small');
+        console.log('ControlNet: done');
+        return await new Promise(function(res) { var r = new FileReader(); r.onload = function() { res(r.result); }; r.readAsDataURL(blob); });
+      });
+    }
+
     // Provider 0.5: HuggingFace 360° panorama models (FREE, trained for equirectangular)
     const hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
     if (hfKey) {
@@ -4548,10 +4576,10 @@ async function generateImage(prompt, opts = {}) {
     providers.push(async () => {
       var msgContent = [];
       // If we have a floor plan, send it as reference image for img2img
-      var planRef = state.__currentPlanSrc;
+      var planRef = opts.planCropSrc || state.__currentPlanSrc;
       if (planRef && opts.coherent) {
-        msgContent.push({ type: 'image_url', image_url: { url: planRef } });
-        msgContent.push({ type: 'text', text: 'Based on this floor plan, generate a photorealistic architectural render of: ' + prompt });
+        msgContent.push({ type: 'image_url', image_url: { url: planRef, detail: 'high' } });
+        msgContent.push({ type: 'text', text: 'You are an expert architectural renderer. The attached image is a floor plan. Generate a photorealistic render that EXACTLY matches the layout shown in this plan. Preserve every wall position, room size, and spatial relationship. Do not invent rooms or change the layout. Render: ' + prompt });
       } else {
         msgContent.push({ type: 'text', text: 'Generate a high quality photorealistic image of: ' + prompt });
       }
@@ -5338,7 +5366,7 @@ async function executeAgent(agent) {
             swarmLog(agent.name, `🔄 Reintentando (${retry}/2)...`);
             await new Promise(r => setTimeout(r, 2000 * retry));
           }
-          imgUrl = await generateImage(agent.prompt, { fast: true, coherent: true });
+          imgUrl = await generateImage(agent.prompt, { fast: true, coherent: true, planCropSrc: agent.planCropSrc });
         }
         if (imgUrl) {
           agent.renderUrl = imgUrl;
@@ -5383,7 +5411,7 @@ async function retryRender(agentId) {
   swarmLog(agent.name, '🔄 Reintentando render...');
 
   try {
-    const imgUrl = await generateImage(agent.prompt, { fast: true, coherent: true });
+    const imgUrl = await generateImage(agent.prompt, { fast: true, coherent: true, planCropSrc: agent.planCropSrc });
     if (imgUrl) {
       agent.renderUrl = imgUrl;
       agent.status = 'done';
@@ -5546,19 +5574,23 @@ async function runSwarm(projectInfo) {
           body: JSON.stringify({
             model: visionModel,
             messages: [{ role: 'user', content: [
-              { type: 'image_url', image_url: { url: planSrc } },
-              { type: 'text', text: `You are an expert architectural renderer. Study this floor plan carefully.
+              { type: 'image_url', image_url: { url: planSrc, detail: 'high' } },
+              { type: 'text', text: `You are an expert architectural visualization artist. Study this floor plan image very carefully.
 
-For EACH distinct space you can identify (each unit, each common area, each outdoor area), write a DETAILED render description that a 3D artist would use to create a photorealistic image.
+For EACH distinct space you see (each unit, room, common area, outdoor area), provide:
+1. The space name (using labels from the plan like E-1, E-2, etc)
+2. A detailed render description a 3D artist would follow
+3. The approximate bounding box of this space in the plan image (as percentage coordinates)
 
-Format your response as a JSON array:
+Format as JSON array:
 [
-  {"space": "E-1 Living Room", "render_prompt": "Open plan living room approximately 5x4m, large window on north wall facing garden, connected to kitchen on the east side, tile flooring, 2.7m ceiling height, modern furniture arrangement with L-shaped sofa facing window"},
-  {"space": "Pool Area", "render_prompt": "Rectangular pool 8x4m centered in courtyard, surrounded by concrete deck, lounge chairs on south side, tropical landscaping with palm trees, overlooked by unit balconies"},
-  ...
+  {"space": "E-1 Living Room", "bbox": {"x": 10, "y": 20, "w": 15, "h": 12}, "render_prompt": "Open plan living room 5x4m, north-facing window to garden, L-shaped sofa, connected to kitchen on east, tile floor, 2.7m ceiling"},
+  {"space": "Main Pool", "bbox": {"x": 40, "y": 50, "w": 20, "h": 15}, "render_prompt": "Rectangular pool 8.88x4m, concrete deck surround, lounge chairs south side, palm trees, overlooked by unit balconies on 3 sides"}
 ]
 
-Include: exact dimensions you can read, orientation, what each space connects to, what views it has, furniture placement logic. Be SPECIFIC to THIS plan, not generic. List 15-30 spaces.` }
+bbox values are PERCENTAGES (0-100) of the image width/height where the space is located.
+
+CRITICAL: Read ALL measurements, labels, room codes visible in the plan. Be SPECIFIC to THIS exact plan. List every space you can identify (15-30 spaces).` }
             ]}]
           })
         });
@@ -5592,22 +5624,55 @@ Include: exact dimensions you can read, orientation, what each space connects to
   const renderAgents = swarmState.agents.filter(a => a.taskFn === 'render');
   const otherAgents = swarmState.agents.filter(a => a.taskFn !== 'render');
 
-  // REWRITE render prompts with plan-specific descriptions
+  // REWRITE render prompts AND crop room images from plan
   if (state.__planRenderDescriptions && state.__planRenderDescriptions.length > 0) {
     var descriptions = state.__planRenderDescriptions;
     var dna = state.__styleDNA || '';
     var loc = projectInfo.location || '';
     var projName = projectInfo.name || '';
 
+    // Crop each room from the plan if bbox data available
+    if (planSrc) {
+      try {
+        var planImg = new Image();
+        planImg.src = planSrc;
+        await new Promise(function(resolve) {
+          planImg.onload = resolve;
+          if (planImg.complete) resolve();
+          setTimeout(resolve, 3000);
+        });
+
+        descriptions.forEach(function(desc) {
+          if (desc.bbox && planImg.naturalWidth > 0) {
+            try {
+              var c = document.createElement('canvas');
+              var pw = planImg.naturalWidth;
+              var ph = planImg.naturalHeight;
+              c.width = Math.round(desc.bbox.w * pw / 100);
+              c.height = Math.round(desc.bbox.h * ph / 100);
+              c.getContext('2d').drawImage(planImg,
+                Math.round(desc.bbox.x * pw / 100), Math.round(desc.bbox.y * ph / 100),
+                c.width, c.height, 0, 0, c.width, c.height);
+              desc.cropSrc = c.toDataURL('image/jpeg', 0.8);
+            } catch(e) {}
+          }
+        });
+        var croppedCount = descriptions.filter(function(d) { return d.cropSrc; }).length;
+        if (croppedCount > 0) swarmLog('Coordinator', croppedCount + ' habitaciones recortadas del plano');
+      } catch(e) {}
+    }
+
+    // Rewrite each render agent with plan-specific data
     renderAgents.forEach(function(agent, i) {
-      // Match agent to a plan description or cycle through them
       var desc = descriptions[i % descriptions.length];
       if (desc && desc.render_prompt) {
         agent.task = desc.space || agent.task;
         agent.prompt = projName + ' in ' + loc + ', ' + desc.space + ': ' + desc.render_prompt + ', ' + dna + ', photorealistic architectural render, 8K, cinematic lighting, no text no watermark';
+        // Store the cropped room image as reference for this specific render
+        if (desc.cropSrc) agent.planCropSrc = desc.cropSrc;
       }
     });
-    swarmLog('Coordinator', renderAgents.length + ' renders reescritos con descripciones especificas del plano');
+    swarmLog('Coordinator', renderAgents.length + ' renders con descripciones y recortes del plano');
   } else if (state.__planAnalysis) {
     var analysis = state.__planAnalysis;
     renderAgents.forEach(function(agent) {
@@ -7147,7 +7212,7 @@ async function visualModifyPlan() {
         messages: [{
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: planSrc } },
+            { type: 'image_url', image_url: { url: planSrc, detail: 'high' } },
             { type: 'text', text: `This is an architectural floor plan. Modify it according to this instruction: "${modification}".
 Keep the same drawing style, scale, and level of detail as the original.
 Keep all existing labels, measurements, and annotations.
@@ -7229,7 +7294,7 @@ PREGUNTA DEL CLIENTE: ${text}
 Responde en español. Sé técnico y profesional. Si piden modificaciones, explica: qué cambiar, impacto estructural, costo estimado, y si cumple normativa. NO puedes dibujar pero describe los cambios con precisión para que un arquitecto los implemente.`;
 
     const userContent = planSrc
-      ? [{ type: 'image_url', image_url: { url: planSrc } }, { type: 'text', text: contextPrefix }]
+      ? [{ type: 'image_url', image_url: { url: planSrc, detail: 'high' } }, { type: 'text', text: contextPrefix }]
       : contextPrefix;
 
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -7297,7 +7362,7 @@ async function renderUploadedPlan(src, btn) {
         messages: [{
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: planSrc } },
+            { type: 'image_url', image_url: { url: planSrc, detail: 'high' } },
             { type: 'text', text: `Transform this architectural floor plan into a stunning photorealistic top-down 3D architectural visualization.
 Show the EXACT same layout as the floor plan but rendered as a beautiful 3D dollhouse view with:
 - Realistic walls, doors, and windows matching the plan
