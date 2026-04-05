@@ -2878,7 +2878,11 @@ const state = {
   lightboxIdx: 0,
   chatOpen: false,
   transitioning: false,
-  pendingImages: []  // base64 images waiting to be sent with next message
+  pendingImages: [],  // base64 images waiting to be sent with next message
+  // === MEJORA FIDELIDAD PLANO-RENDER v2 ===
+  __planRoomsJSON: null,   // Parsed room array from structured vision analysis
+  __roomCrops: {},         // { roomCode: dataURL } cropped room images from plan
+  __currentPlanImage: null  // Raw Image element of the current plan (for fast cropping)
 };
 
 // =============================================
@@ -4496,30 +4500,36 @@ async function generateImage(prompt, opts = {}) {
     // HuggingFace key — used by ControlNet and panorama models
     var hfKey = state.hfKey || localStorage.getItem('cayenabot_hf_key') || localStorage.getItem('hf_key') || '';
 
+    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Enhanced negative prompt for all providers
+    var __FAITHFUL_NEGATIVE = 'cambios en layout, distribución diferente al plano, paredes movidas, habitaciones inventadas, proporciones equivocadas, elementos extras, different layout, wrong proportions, extra rooms, missing rooms, moved walls, blurry, low quality, cartoon, 3d render toy, different from reference, text, watermark, logo, people, distorted, anime, sketch, nsfw';
+
     // Provider 0.3: ControlNet (uses plan as spatial guide — best for plan-accurate renders)
     var controlRef = opts.planCropSrc || state.__currentPlanSrc;
     if (hfKey && controlRef) {
       providers.push(async () => {
-        // Extract base64 data from data URL
         var b64 = controlRef.split(',')[1] || controlRef;
+        // === MEJORA FIDELIDAD PLANO-RENDER v2 === Higher conditioning scale for faithful mode
+        var condScale = opts.faithfulMode ? 0.96 : 0.92;
+        var steps = opts.faithfulMode ? 30 : 25;
+        var guidance = opts.faithfulMode ? 9.5 : 8;
         var resp = await fetch('https://api-inference.huggingface.co/models/lllyasviel/control_v11p_sd15_scribble', {
           method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
           headers: { 'Authorization': 'Bearer ' + hfKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             inputs: b64,
             parameters: {
-              prompt: 'photorealistic luxury architectural render exactly matching floor plan layout, ' + prompt + ', 8K, professional CGI, Architectural Digest quality, precise proportions',
-              negative_prompt: 'different layout, wrong proportions, extra rooms, missing rooms, moved walls, blurry, cartoon, low quality, text, watermark, logo, people, distorted, different from reference',
-              num_inference_steps: 25,
-              guidance_scale: 8,
-              controlnet_conditioning_scale: 0.92
+              prompt: 'photorealistic luxury architectural render EXACTLY matching floor plan layout and proportions, ' + prompt + ', 8K, professional CGI, Architectural Digest quality, precise wall positions, exact room dimensions',
+              negative_prompt: __FAITHFUL_NEGATIVE,
+              num_inference_steps: steps,
+              guidance_scale: guidance,
+              controlnet_conditioning_scale: condScale
             }
           })
         });
         if (!resp.ok) throw new Error('ControlNet HTTP ' + resp.status);
         var blob = await resp.blob();
         if (blob.size < 5000) throw new Error('ControlNet too small');
-        console.log('ControlNet: done');
+        console.log('ControlNet: done (conditioning=' + condScale + ', steps=' + steps + ')');
         return await new Promise(function(res) { var r = new FileReader(); r.onload = function() { res(r.result); }; r.readAsDataURL(blob); });
       });
     }
@@ -4568,7 +4578,7 @@ async function generateImage(prompt, opts = {}) {
         const sdResp = await fetch(`${sdUrl}/sdapi/v1/txt2img`, {
           method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: `photorealistic architectural render, ${prompt}, high quality, 8k`, negative_prompt: 'cartoon, anime, sketch, low quality, blurry, text, watermark', steps: fast ? 8 : 20, cfg_scale: 7, width: 1024, height: 768, sampler_name: 'DPM++ 2M' })
+          body: JSON.stringify({ prompt: `photorealistic architectural render, ${prompt}, high quality, 8k, exact proportions`, negative_prompt: opts.faithfulMode ? __FAITHFUL_NEGATIVE : 'cartoon, anime, sketch, low quality, blurry, text, watermark', steps: fast ? 8 : (opts.faithfulMode ? 25 : 20), cfg_scale: opts.faithfulMode ? 8.5 : 7, width: 1024, height: 768, sampler_name: 'DPM++ 2M' })
         });
         if (!sdResp.ok) throw new Error('SD HTTP ' + sdResp.status);
         const d = await sdResp.json();
@@ -4577,16 +4587,34 @@ async function generateImage(prompt, opts = {}) {
       });
     }
 
-    // Provider 2: OpenRouter Gemini — uses plan image as reference if available (img2img)
+    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Enhanced OpenRouter Gemini with dual-image reference
     providers.push(async () => {
       var msgContent = [];
-      // If we have a floor plan, send it as reference image for img2img
       var planRef = opts.planCropSrc || state.__currentPlanSrc;
+      var fullPlan = state.__currentPlanSrc;
       if (planRef && opts.coherent) {
+        // Send BOTH the full plan AND the room crop for maximum spatial context
+        if (fullPlan && planRef !== fullPlan) {
+          msgContent.push({ type: 'image_url', image_url: { url: fullPlan, detail: 'high' } });
+          msgContent.push({ type: 'text', text: 'This is the COMPLETE floor plan of the project. Study the full layout carefully.' });
+        }
         msgContent.push({ type: 'image_url', image_url: { url: planRef, detail: 'high' } });
-        msgContent.push({ type: 'text', text: 'You are an expert architectural 3D renderer. The attached image is a REAL floor plan of a construction project. Generate a photorealistic render that FAITHFULLY follows this exact plan. STRICT RULES: 1) Every wall, door, window must match the plan positions exactly. 2) Room proportions and dimensions must match what is shown. 3) Do NOT invent rooms, remove rooms, or change the layout in any way. 4) Add realistic furniture, materials and lighting appropriate to each space. 5) Maintain the exact spatial relationships between rooms. Render this specific view: ' + prompt });
+        msgContent.push({ type: 'text', text: `You are an expert architectural 3D renderer with 20 years experience. The attached image${fullPlan && planRef !== fullPlan ? 's show the full project plan AND a crop of the specific room' : ' is a REAL floor plan'}.
+
+Generate a photorealistic interior/exterior render that is EXTREMELY FAITHFUL to this exact plan.
+
+ABSOLUTE RULES — VIOLATION = FAILURE:
+1) Every wall position, door, window MUST match the plan positions EXACTLY
+2) Room proportions and dimensions MUST match what is shown — do NOT stretch or compress
+3) Do NOT invent rooms, remove rooms, add windows/doors, or change the layout in ANY way
+4) The spatial relationships between rooms must be IDENTICAL to the plan
+5) Add realistic furniture, materials, lighting appropriate to each space
+6) Camera angle should show the room's actual shape and proportions clearly
+7) Negative: ${__FAITHFUL_NEGATIVE}
+
+Render this specific view: ${prompt}` });
       } else {
-        msgContent.push({ type: 'text', text: 'Generate a high quality photorealistic image of: ' + prompt });
+        msgContent.push({ type: 'text', text: 'Generate a high quality photorealistic architectural image of: ' + prompt });
       }
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST', signal: AbortSignal.timeout(fast ? 45000 : 90000),
@@ -4596,7 +4624,7 @@ async function generateImage(prompt, opts = {}) {
       if (!resp.ok) throw new Error('OR HTTP ' + resp.status);
       const d = await resp.json();
       const url = __extractImageFromMsg(d.choices?.[0]?.message);
-      if (url) { console.log('OpenRouter + plan ref: done'); return url; }
+      if (url) { console.log('OpenRouter Gemini + plan ref: done (faithful=' + !!opts.faithfulMode + ')'); return url; }
       throw new Error('No image');
     });
 
@@ -4606,7 +4634,7 @@ async function generateImage(prompt, opts = {}) {
         method: 'POST', signal: AbortSignal.timeout(10000),
         headers: { 'Content-Type': 'application/json', 'apikey': '0000000000', 'Client-Agent': 'CayenaBot:1.0:cayenabot' },
         body: JSON.stringify({
-          prompt: `photorealistic architectural render, luxury real estate, ${prompt}, professional photography ### blurry, cartoon, anime, nsfw, nude, person`,
+          prompt: `photorealistic architectural render, luxury real estate, ${prompt}, professional photography, exact proportions, precise layout ### ${opts.faithfulMode ? 'different layout, wrong proportions, extra rooms, moved walls, ' : ''}blurry, cartoon, anime, nsfw, nude, person, text, watermark`,
           params: { width: 1024, height: 512, steps: 20, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
           models: ['AlbedoBase XL (SDXL)', 'SDXL 1.0', 'Deliberate', 'stable_diffusion'],
           nsfw: true, censor_nsfw: false, r2: true, replacement_filter: true
@@ -4636,16 +4664,18 @@ async function generateImage(prompt, opts = {}) {
       throw new Error('Timeout');
     });
 
-    // Provider 4: Pollinations via CORS proxy
-    const seed = Date.now() + Math.floor(Math.random() * 10000);
-    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 200))}?width=1024&height=768&model=flux&nologo=true&seed=${seed}`;
+    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Enhanced Pollinations with negative prompt support
+    const seed = opts.faithfulMode ? (state.__styleSeed || Date.now()) : (Date.now() + Math.floor(Math.random() * 10000));
+    // Pollinations supports negative prompt via URL parameter
+    const negParam = opts.coherent ? '&negative=' + encodeURIComponent('different layout, wrong proportions, extra rooms, moved walls, blurry, cartoon, text, watermark') : '';
+    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 300))}?width=1024&height=768&model=flux&nologo=true&seed=${seed}${negParam}`;
     providers.push(async () => {
       const pUrl = `https://corsproxy.io/?url=${encodeURIComponent(pollUrl)}`;
       const r = await fetch(pUrl, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
       if (!r.ok) throw new Error('Pollinations HTTP ' + r.status);
       const blob = await r.blob();
       if (blob.size < 1000 || !blob.type.startsWith('image')) throw new Error('Not an image');
-      console.log('Pollinations: ✅');
+      console.log('Pollinations: ✅ (seed=' + seed + ')');
       return await __toDataUrl(blob);
     });
 
@@ -5371,13 +5401,16 @@ async function executeAgent(agent) {
             swarmLog(agent.name, `🔄 Reintentando (${retry}/2)...`);
             await new Promise(r => setTimeout(r, 2000 * retry));
           }
-          imgUrl = await generateImage(agent.prompt, { fast: true, coherent: true, planCropSrc: agent.planCropSrc });
+          // === MEJORA FIDELIDAD PLANO-RENDER v2 === Pass faithfulMode flag for plan-based renders
+          imgUrl = await generateImage(agent.prompt, { fast: true, coherent: true, planCropSrc: agent.planCropSrc, faithfulMode: !!agent.faithfulMode });
         }
         if (imgUrl) {
           agent.renderUrl = imgUrl;
           addRenderToGallery(imgUrl, agent.task);
           addToTour(imgUrl, agent.task, { silent: true });
-          swarmLog(agent.name, `✅ Render generado + agregado al tour: ${agent.task}`, 'ok');
+          // === MEJORA FIDELIDAD PLANO-RENDER v2 === Visible logging with fidelity info
+          var fidelityInfo = agent.faithfulMode ? ' (modo fiel, con crop del plano)' : '';
+          swarmLog(agent.name, `✅ Render generado${fidelityInfo}: ${agent.task}`, 'ok');
           // Auto-save checkpoint after each successful render
           __autoSaveProject();
         } else {
@@ -5568,11 +5601,25 @@ async function runSwarm(projectInfo) {
   if (planSrc || state.__planAnalysis) {
     swarmLog('Coordinator', 'Fase 0: Leyendo planos para generar renders fieles...');
 
+    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Use pre-parsed rooms if available from processUploadedPlan
+    if (state.__planRoomsJSON && state.__planRoomsJSON.length > 0 && !state.__planRenderDescriptions) {
+      state.__planRenderDescriptions = state.__planRoomsJSON.map(function(r) {
+        return {
+          space: (r.code || '') + ' ' + (r.name || ''),
+          bbox: r.bbox ? { x: r.bbox.x, y: r.bbox.y, w: r.bbox.width || r.bbox.w, h: r.bbox.height || r.bbox.h } : null,
+          dimensions: r.estimated_dimensions || '',
+          render_prompt: r.detailed_render_prompt || '',
+          cropSrc: r._cropSrc || state.__roomCrops[r.code] || null
+        };
+      });
+      swarmLog('Coordinator', 'Usando ' + state.__planRenderDescriptions.length + ' espacios pre-analizados del plano');
+    }
+
     if (!state.__planRenderDescriptions && planSrc) {
       try {
         var visionModel = (state.freeModels || []).find(function(m) { return /vl|vision/i.test(m); }) || 'qwen/qwen-2.5-vl-72b-instruct:free';
 
-        // Step 1: Get the AI to describe EACH space for rendering
+        // === MEJORA FIDELIDAD PLANO-RENDER v2 === Enhanced structured prompt
         var descResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST', signal: AbortSignal.timeout(90000),
           headers: { 'Authorization': 'Bearer ' + state.orKey, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBuilder' },
@@ -5580,28 +5627,30 @@ async function runSwarm(projectInfo) {
             model: visionModel,
             messages: [{ role: 'user', content: [
               { type: 'image_url', image_url: { url: planSrc, detail: 'high' } },
-              { type: 'text', text: `You are an architect and 3D visualization expert with 20 years experience reading floor plans. Analyze this floor plan with MAXIMUM PRECISION.
+              { type: 'text', text: `Eres un arquitecto profesional experto en lectura de planos. Analiza esta imagen con MÁXIMA PRECISIÓN.
 
-For EACH space visible (each unit, room, common area, outdoor area), return ONLY a valid JSON array — no other text:
-
+Devuelve ÚNICAMENTE un JSON array válido (sin texto extra, sin markdown):
 [
   {
     "space": "E-1 Sala Principal",
+    "code": "E-1",
     "bbox": {"x": 15, "y": 22, "w": 28, "h": 35},
     "dimensions": "6.5m x 5.2m",
-    "render_prompt": "Sala principal exactamente 6.5x5.2m con ventana completa al jardin norte, cocina integrada tipo L en el lado este, piso porcelanato 80x80, techo 2.85m, iluminacion natural fuerte desde el norte, paredes blancas, conexion directa a pasillo central, puerta de entrada al sur"
+    "orientation": "norte-sur",
+    "adjacent": "pasillo central al sur, cocina al este, balcón al norte",
+    "render_prompt": "Sala principal exactamente 6.5x5.2m con ventana completa al jardín norte, cocina integrada tipo L en el lado este, piso porcelanato 80x80, techo 2.85m, iluminación natural fuerte desde el norte, paredes blancas, conexión directa a pasillo central, puerta de entrada al sur. Paredes: norte=ventanal completo, sur=puerta acceso, este=muro con abertura a cocina, oeste=muro cerrado"
   }
 ]
 
-MANDATORY RULES:
-- Use the REAL codes from the plan (E-1, E-2, E-4, 3-7, etc.)
-- Include EXACT measurements you can read or logically deduce
-- Describe wall positions, window locations, door connections precisely
-- Describe what is ADJACENT to each space (what connects north/south/east/west)
-- bbox values are PERCENTAGES (0-100) of image width/height
-- DO NOT invent anything not visible or deducible from the plan
-- List 15-30 spaces minimum
-- Response must be ONLY the JSON array, no markdown, no explanation` }
+REGLAS ESTRICTAS:
+- Usa los códigos REALES del plano (E-1, E-2, PB-01, etc.)
+- bbox son PORCENTAJES (0-100) de ancho/alto de la imagen
+- Incluye medidas EXACTAS que puedas leer o deducir lógicamente
+- En render_prompt describe CADA PARED (norte/sur/este/oeste): si tiene ventana, puerta, muro cerrado, abertura
+- Describe qué espacio es ADYACENTE en cada dirección
+- NO inventes NADA que no sea visible o deducible del plano
+- Lista 15-30 espacios mínimo
+- Respuesta SOLO el JSON array` }
             ]}]
           })
         });
@@ -5610,21 +5659,19 @@ MANDATORY RULES:
           var descData = await descResp.json();
           var descText = descData.choices?.[0]?.message?.content || '';
 
-          // Parse JSON from response
-          // Strip markdown code blocks if present
-          descText = descText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-          var jsonMatch = descText.match(/\[[\s\S]*\]/);
-          if (jsonMatch) {
-            try {
-              state.__planRenderDescriptions = JSON.parse(jsonMatch[0]);
-              swarmLog('Coordinator', 'Plano interpretado: ' + state.__planRenderDescriptions.length + ' espacios identificados');
-            } catch(e) {
-              swarmLog('Coordinator', 'Error parseando descripciones, usando texto directo');
-              state.__planAnalysis = descText;
-            }
+          // === MEJORA FIDELIDAD PLANO-RENDER v2 === Use robust JSON parser
+          var parsed = __robustParseJSON(descText);
+          var roomsArr = null;
+          if (parsed) {
+            roomsArr = Array.isArray(parsed) ? parsed : (parsed.rooms || null);
+          }
+          if (roomsArr && roomsArr.length > 0) {
+            state.__planRenderDescriptions = roomsArr;
+            state.__planRoomsJSON = roomsArr;
+            swarmLog('Coordinator', 'Plano interpretado: ' + roomsArr.length + ' espacios identificados con bbox y prompts detallados');
           } else {
             state.__planAnalysis = descText;
-            swarmLog('Coordinator', 'Plano analizado en texto libre');
+            swarmLog('Coordinator', 'Plano analizado en texto libre (JSON no parseable)');
           }
         }
       } catch(e) {
@@ -5644,48 +5691,73 @@ MANDATORY RULES:
     var loc = projectInfo.location || '';
     var projName = projectInfo.name || '';
 
-    // Crop each room from the plan if bbox data available
+    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Crop each room from plan using improved bbox + padding
     if (planSrc) {
       try {
-        var planImg = new Image();
-        planImg.src = planSrc;
+        var planImg = state.__currentPlanImage || new Image();
+        if (!planImg.src) planImg.src = planSrc;
         await new Promise(function(resolve) {
+          if (planImg.complete && planImg.naturalWidth > 0) return resolve();
           planImg.onload = resolve;
-          if (planImg.complete) resolve();
-          setTimeout(resolve, 3000);
+          setTimeout(resolve, 5000);
         });
 
-        descriptions.forEach(function(desc) {
-          if (desc.bbox && planImg.naturalWidth > 0) {
-            try {
-              var c = document.createElement('canvas');
-              var pw = planImg.naturalWidth;
-              var ph = planImg.naturalHeight;
-              c.width = Math.round(desc.bbox.w * pw / 100);
-              c.height = Math.round(desc.bbox.h * ph / 100);
-              c.getContext('2d').drawImage(planImg,
-                Math.round(desc.bbox.x * pw / 100), Math.round(desc.bbox.y * ph / 100),
-                c.width, c.height, 0, 0, c.width, c.height);
-              desc.cropSrc = c.toDataURL('image/jpeg', 0.8);
-            } catch(e) {}
-          }
-        });
-        var croppedCount = descriptions.filter(function(d) { return d.cropSrc; }).length;
-        if (croppedCount > 0) swarmLog('Coordinator', croppedCount + ' habitaciones recortadas del plano');
+        if (planImg.naturalWidth > 0) {
+          var pw = planImg.naturalWidth;
+          var ph = planImg.naturalHeight;
+          descriptions.forEach(function(desc) {
+            // Use pre-generated crop if available
+            if (!desc.cropSrc && state.__roomCrops) {
+              var code = desc.code || desc.space?.split(' ')[0] || '';
+              if (state.__roomCrops[code]) { desc.cropSrc = state.__roomCrops[code]; return; }
+            }
+            if (desc.bbox && !desc.cropSrc) {
+              try {
+                var c = document.createElement('canvas');
+                var bx = desc.bbox.x || 0, by = desc.bbox.y || 0;
+                var bw = desc.bbox.w || desc.bbox.width || 20, bh = desc.bbox.h || desc.bbox.height || 20;
+                // Add 3% padding for spatial context
+                var pad = 3;
+                var sx = Math.max(0, Math.round((bx - pad) * pw / 100));
+                var sy = Math.max(0, Math.round((by - pad) * ph / 100));
+                var sw = Math.min(pw - sx, Math.round((bw + pad * 2) * pw / 100));
+                var sh = Math.min(ph - sy, Math.round((bh + pad * 2) * ph / 100));
+                if (sw < 10 || sh < 10) return;
+                c.width = sw; c.height = sh;
+                c.getContext('2d').drawImage(planImg, sx, sy, sw, sh, 0, 0, sw, sh);
+                desc.cropSrc = c.toDataURL('image/jpeg', 0.85);
+              } catch(e) {}
+            }
+          });
+          var croppedCount = descriptions.filter(function(d) { return d.cropSrc; }).length;
+          if (croppedCount > 0) swarmLog('Coordinator', croppedCount + ' habitaciones recortadas del plano con padding contextual');
+        }
       } catch(e) {}
     }
 
-    // Rewrite each render agent with plan-specific data
+    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Rewrite each render agent with ultra-faithful prompt
     renderAgents.forEach(function(agent, i) {
       var desc = descriptions[i % descriptions.length];
       if (desc && desc.render_prompt) {
         agent.task = desc.space || agent.task;
-        agent.prompt = projName + ' in ' + loc + ', ' + desc.space + ': ' + desc.render_prompt + '. EXACTLY the layout, proportions, walls, windows and distribution from the floor plan. ' + (desc.dimensions ? 'Room dimensions: ' + desc.dimensions + '. ' : '') + dna + ', photorealistic, Architectural Digest quality, 8K, cinematic lighting, precise architectural proportions, no text no watermark';
+        var roomDims = desc.dimensions || '';
+        var roomOrient = desc.orientation || '';
+        var roomAdj = desc.adjacent || '';
+        agent.prompt = `Genera render fotorealista de ${desc.space} para el proyecto ${projName}${loc ? ' en ' + loc : ''}.
+Layout EXACTO del plano de referencia: mantén TODAS las paredes, dimensiones${roomDims ? ' (' + roomDims + ')' : ''}, ventanas, puertas y proporciones reales.
+Usa la imagen del plano y el crop de esta habitación como referencia estricta.
+${desc.render_prompt}
+${roomOrient ? 'Orientación: ' + roomOrient + '. ' : ''}${roomAdj ? 'Adyacente a: ' + roomAdj + '. ' : ''}
+Estilo: ${dna || 'fotorealista, iluminación natural cinematográfica, 8K, detalle arquitectónico preciso, Architectural Digest'}.
+NO cambies la distribución, NO agregues habitaciones extras, NO muevas paredes.
+equirectangular 360 interior panorama, seamless spherical, photorealistic, 8K, warm cinematic lighting, no text no watermark`;
         // Store the cropped room image as reference for this specific render
         if (desc.cropSrc) agent.planCropSrc = desc.cropSrc;
+        agent.faithfulMode = true;
+        swarmLog(agent.name, `Prompt fiel: ${desc.space} ${roomDims} con crop del plano`);
       }
     });
-    swarmLog('Coordinator', renderAgents.length + ' renders con descripciones y recortes del plano');
+    swarmLog('Coordinator', renderAgents.length + ' renders con descripciones ultra-fieles y recortes del plano');
   } else if (state.__planAnalysis) {
     var analysis = state.__planAnalysis;
     renderAgents.forEach(function(agent) {
@@ -5768,7 +5840,10 @@ MANDATORY RULES:
   if (failedRenders > 0) {
     summaryHTML += `<br><button onclick="retryAllFailed()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px">🔄 Reintentar ${failedRenders} renders fallidos</button>`;
   }
+  // === MEJORA FIDELIDAD PLANO-RENDER v2 === Add faithful re-render button if plan data exists
+  var hasPlanData = state.__planRoomsJSON && state.__planRoomsJSON.length > 0;
   summaryHTML += `<br><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+    ${hasPlanData ? '<button onclick="closeSwarm();regenerateFaithfulRenders()" style="background:linear-gradient(135deg,var(--gold),#e09560);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer">🔄 Regenerar Renders Fieles al Plano</button>' : ''}
     <button onclick="optimizeTour()" style="background:linear-gradient(135deg,#4a7cf7,#3b5bd4);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer">🧠 Optimizar Tour con AI</button>
     <button onclick="closeSwarm();switchTab('tour')" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 20px;font-size:13px;cursor:pointer">🧭 Ver Tour Virtual</button>
     <button onclick="closeSwarm();switchTab('gallery')" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 20px;font-size:13px;cursor:pointer">🖼️ Ver Galería</button>
@@ -6943,6 +7018,129 @@ function downloadAIRender(btn) {
   a.click();
 }
 
+// === MEJORA FIDELIDAD PLANO-RENDER v2 === Robust JSON parser for vision responses
+function __robustParseJSON(text) {
+  if (!text) return null;
+  // Strip markdown code blocks
+  let cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+  // Try parsing the full text as JSON first
+  try { return JSON.parse(cleaned); } catch(e) {}
+  // Try extracting a JSON object {...}
+  const objMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (objMatch) { try { return JSON.parse(objMatch[0]); } catch(e) {} }
+  // Try extracting a JSON array [...]
+  const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (arrMatch) { try { return { rooms: JSON.parse(arrMatch[0]) }; } catch(e) {} }
+  // Try fixing common issues: trailing commas, single quotes
+  if (objMatch) {
+    try {
+      let fixed = objMatch[0].replace(/,\s*([}\]])/g, '$1').replace(/'/g, '"');
+      return JSON.parse(fixed);
+    } catch(e) {}
+  }
+  return null;
+}
+
+// === MEJORA FIDELIDAD PLANO-RENDER v2 === Generate room crops from plan image using bbox data
+async function __generateRoomCrops(planImg, rooms) {
+  if (!planImg || !rooms || rooms.length === 0) return;
+  // Wait for image load
+  await new Promise(resolve => {
+    if (planImg.complete && planImg.naturalWidth > 0) return resolve();
+    planImg.onload = resolve;
+    setTimeout(resolve, 5000);
+  });
+  if (!planImg.naturalWidth) return;
+
+  const pw = planImg.naturalWidth;
+  const ph = planImg.naturalHeight;
+  state.__roomCrops = {};
+  let cropCount = 0;
+
+  rooms.forEach(room => {
+    const bbox = room.bbox;
+    if (!bbox) return;
+    const bx = bbox.x || 0, by = bbox.y || 0;
+    const bw = bbox.width || bbox.w || 20, bh = bbox.height || bbox.h || 20;
+    try {
+      const c = document.createElement('canvas');
+      // Add 5% padding around the crop for context
+      const pad = 3;
+      const sx = Math.max(0, Math.round((bx - pad) * pw / 100));
+      const sy = Math.max(0, Math.round((by - pad) * ph / 100));
+      const sw = Math.min(pw - sx, Math.round((bw + pad * 2) * pw / 100));
+      const sh = Math.min(ph - sy, Math.round((bh + pad * 2) * ph / 100));
+      if (sw < 10 || sh < 10) return;
+      c.width = sw; c.height = sh;
+      c.getContext('2d').drawImage(planImg, sx, sy, sw, sh, 0, 0, sw, sh);
+      const cropUrl = c.toDataURL('image/jpeg', 0.85);
+      const key = room.code || room.name || ('room_' + cropCount);
+      state.__roomCrops[key] = cropUrl;
+      room._cropSrc = cropUrl;
+      cropCount++;
+    } catch(e) { console.warn('Crop failed for', room.code, e); }
+  });
+  console.log(`__generateRoomCrops: ${cropCount}/${rooms.length} rooms cropped`);
+}
+
+// === MEJORA FIDELIDAD PLANO-RENDER v2 === Regenerate renders faithful to the uploaded plan
+async function regenerateFaithfulRenders() {
+  const rooms = state.__planRoomsJSON || state.__planRenderDescriptions;
+  const planSrc = state.__currentPlanSrc;
+  if (!rooms || rooms.length === 0 || !planSrc) {
+    showToast('⚠️ No hay datos de plano. Sube un plano primero.');
+    return;
+  }
+
+  showToast(`🔄 Generando ${rooms.length} renders fieles al plano...`);
+  addMsg('assistant', `🔄 <strong>Regenerando renders fieles al plano</strong> — ${rooms.length} espacios detectados. Usando crops del plano + prompts detallados para máxima fidelidad.`);
+
+  const dna = state.__styleDNA || 'fotorealista, iluminación natural cinematográfica, 8K, detalle arquitectónico preciso, Architectural Digest';
+  const projName = state.projectName || 'Proyecto';
+  const loc = state.projectLocation || '';
+
+  let success = 0, failed = 0;
+  // Process in batches of 3
+  for (let i = 0; i < rooms.length; i += 3) {
+    const batch = rooms.slice(i, i + 3);
+    const results = await Promise.allSettled(batch.map(async (room) => {
+      const code = room.code || room.space || '';
+      const name = room.name || room.space || code;
+      const dims = room.estimated_dimensions || room.dimensions || '';
+      const renderPrompt = room.detailed_render_prompt || room.render_prompt || '';
+      const cropSrc = room._cropSrc || state.__roomCrops[code] || null;
+
+      const prompt = `Genera render fotorealista de ${name} (${code}) para ${projName}${loc ? ' en ' + loc : ''}.
+Layout EXACTO del plano de referencia: mantén TODAS las paredes, dimensiones (${dims}), ventanas, puertas y proporciones reales.
+${renderPrompt}
+Estilo: ${dna}.
+NO cambies la distribución, NO agregues habitaciones extras, NO muevas paredes.`;
+
+      const imgUrl = await generateImage(prompt, {
+        fast: false,
+        coherent: true,
+        planCropSrc: cropSrc || planSrc,
+        faithfulMode: true
+      });
+
+      if (imgUrl) {
+        addRenderToGallery(imgUrl, `${code} ${name}`);
+        addToTour(imgUrl, `${code} ${name}`, { silent: true });
+        return true;
+      }
+      throw new Error('No image');
+    }));
+
+    results.forEach(r => { if (r.status === 'fulfilled') success++; else failed++; });
+    if (i + 3 < rooms.length) await new Promise(r => setTimeout(r, 800));
+  }
+
+  addMsg('assistant', `✅ <strong>Renders fieles completados:</strong> ${success} exitosos, ${failed} fallidos de ${rooms.length} total.`);
+  showToast(`✅ ${success} renders fieles generados`);
+  buildGallery();
+  __autoSaveProject();
+}
+
 function handlePlanDrop(event) {
   event.preventDefault();
   document.getElementById('plan-upload-area').style.borderColor = 'var(--border)';
@@ -6970,33 +7168,57 @@ async function processUploadedPlan(file) {
     FLOOR_PLANS[key] = { src, label: file.name };
     buildFloorPlans();
 
-    // Analyze with AI vision
+    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Preload plan as Image element for fast cropping
+    const planImg = new Image();
+    planImg.src = src;
+    state.__currentPlanImage = planImg;
+
+    // Analyze with AI vision — structured JSON extraction for render fidelity
     const analysisDiv = document.getElementById('plan-analysis');
-    analysisDiv.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:8px;color:var(--muted)">Analizando plano con AI...</div></div>';
+    analysisDiv.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:8px;color:var(--muted)">Analizando plano con AI (extracción estructurada)...</div></div>';
 
     try {
-      // Use vision model to analyze the floor plan
       const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
 
+      // === MEJORA FIDELIDAD PLANO-RENDER v2 === Two-pass analysis: structured JSON + human-readable
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(90000),
         headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBot' },
         body: JSON.stringify({
           model: visionModel,
           messages: [{
             role: 'user',
             content: [
-              { type: 'image_url', image_url: { url: src } },
-              { type: 'text', text: `Eres un arquitecto experto analizando este plano arquitectónico. Analiza en detalle:
+              { type: 'image_url', image_url: { url: src, detail: 'high' } },
+              { type: 'text', text: `Eres un arquitecto profesional experto en lectura de planos. Analiza esta imagen de plano arquitectónico con máxima precisión y objetividad.
 
-1. **Unidades identificadas**: lista cada unidad/apartamento con su nombre/código (E-1, E-2, etc.)
-2. **Distribución**: habitaciones, baños, cocina, sala de cada unidad que puedas identificar
-3. **Áreas comunes**: piscinas, estacionamiento, jardines, pasillos, lobby
-4. **Medidas visibles**: cualquier medida que puedas leer en el plano
-5. **Observaciones técnicas**: orientación, accesos, flujo de circulación
+Devuelve ÚNICAMENTE un JSON válido (sin texto extra, sin markdown):
+{
+  "project_name": "Nombre deducido o 'Proyecto Cayena'",
+  "overall_description": "Descripción breve del layout general",
+  "rooms": [
+    {
+      "code": "E-1",
+      "name": "Sala Principal",
+      "bbox": {"x": 12, "y": 25, "width": 35, "height": 40},
+      "estimated_dimensions": "6.8m x 5.1m",
+      "orientation": "norte-sur",
+      "key_features": "ventanas al norte, conexión a pasillo, cocina integrada L",
+      "adjacent_spaces": "pasillo central al sur, cocina al este, balcón al norte",
+      "detailed_render_prompt": "Sala principal exactamente según el plano: dimensiones 6.8x5.1m, ventanas completas al norte, cocina tipo L en lado este, piso porcelanato claro, techo 2.85m, iluminación natural fuerte, paredes blancas con molduras simples, puertas y conexiones exactas del plano"
+    }
+  ]
+}
 
-Responde en español. Sé específico con nombres/códigos de unidades visibles.` }
+Reglas estrictas:
+- Extrae códigos REALES del plano (E-1, PB-01, A-3, etc.)
+- bbox son PORCENTAJES (0-100) de la imagen: x,y = esquina superior izquierda del espacio
+- Calcula bbox lo más preciso posible observando la posición de cada espacio
+- NO inventes elementos que no estén en el plano
+- Sé ultra específico con distribución, proporciones, conexiones y orientación
+- En detailed_render_prompt describe EXACTAMENTE lo que se ve: posición de paredes, ventanas, puertas, dimensiones
+- Lista TODOS los espacios visibles (15-40 típicamente)` }
             ]
           }]
         })
@@ -7005,11 +7227,36 @@ Responde en español. Sé específico con nombres/códigos de unidades visibles.
       if (resp.ok) {
         const d = await resp.json();
         const text = d.choices?.[0]?.message?.content || 'No se pudo analizar';
-        analysisDiv.innerHTML = `<div style="font-size:12px;color:var(--gold);margin-bottom:8px;font-weight:600">📋 Análisis del Plano</div><div style="white-space:pre-wrap;line-height:1.5">${text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</div>`;
-        state.__planAnalysis = text;
 
-        // Add to plan chat
-        addPlanChat('ai', '📋 Plano analizado. Puedes pedirme modificaciones, cálculos de m², sugerencias de mejoras, o generar renders 3D.');
+        // === MEJORA FIDELIDAD PLANO-RENDER v2 === Robust JSON parsing
+        const parsed = __robustParseJSON(text);
+        if (parsed && parsed.rooms && parsed.rooms.length > 0) {
+          state.__planRoomsJSON = parsed.rooms;
+          state.__planRenderDescriptions = parsed.rooms.map(r => ({
+            space: (r.code || '') + ' ' + (r.name || ''),
+            bbox: r.bbox ? { x: r.bbox.x, y: r.bbox.y, w: r.bbox.width || r.bbox.w, h: r.bbox.height || r.bbox.h } : null,
+            dimensions: r.estimated_dimensions || '',
+            render_prompt: r.detailed_render_prompt || '',
+            orientation: r.orientation || '',
+            adjacent: r.adjacent_spaces || ''
+          }));
+
+          // Generate room crops immediately
+          await __generateRoomCrops(planImg, state.__planRoomsJSON);
+
+          const roomList = parsed.rooms.map(r => `<strong>${r.code || '?'}</strong> ${r.name} (${r.estimated_dimensions || '?'})`).join('<br>');
+          analysisDiv.innerHTML = `<div style="font-size:12px;color:var(--gold);margin-bottom:8px;font-weight:600">📋 Análisis Estructurado del Plano — ${parsed.rooms.length} espacios</div>
+            <div style="margin-bottom:8px;font-size:12px;color:var(--muted)">${parsed.overall_description || ''}</div>
+            <div style="line-height:1.8;font-size:13px">${roomList}</div>
+            <div style="margin-top:12px"><button onclick="regenerateFaithfulRenders()" style="background:linear-gradient(135deg,var(--gold),#e09560);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer">🔄 Generar Renders Fieles al Plano</button></div>`;
+          state.__planAnalysis = text;
+          addPlanChat('ai', `📋 Plano analizado: ${parsed.rooms.length} espacios identificados con bbox y prompts de render. Puedes generar renders fieles al plano.`);
+        } else {
+          // Fallback: show raw text analysis
+          analysisDiv.innerHTML = `<div style="font-size:12px;color:var(--gold);margin-bottom:8px;font-weight:600">📋 Análisis del Plano</div><div style="white-space:pre-wrap;line-height:1.5">${text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</div>`;
+          state.__planAnalysis = text;
+          addPlanChat('ai', '📋 Plano analizado. Puedes pedirme modificaciones, cálculos de m², sugerencias de mejoras, o generar renders 3D.');
+        }
       } else {
         analysisDiv.innerHTML = `<div style="color:#e05">❌ Error analizando: HTTP ${resp.status}</div>`;
       }
