@@ -4554,185 +4554,77 @@ async function generateImage(prompt, opts = {}) {
       });
     }
 
-    // Provider 0.5: HuggingFace 360° panorama models (FREE, trained for equirectangular)
-    if (hfKey) {
-      // sdxl-360-diffusion: specifically trained on equirectangular images
-      providers.push(async () => {
-        const resp = await fetch('https://api-inference.huggingface.co/models/ProGamerGov/sdxl-360-diffusion', {
-          method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
-          headers: { 'Authorization': `Bearer ${hfKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            inputs: `equirectangular 360 view, ${prompt}, photorealistic, high quality, seamless panorama`,
-            parameters: { width: 1024, height: 512, num_inference_steps: 25, guidance_scale: 7.5 }
-          })
-        });
-        if (!resp.ok) throw new Error('HF 360 HTTP ' + resp.status);
-        const blob = await resp.blob();
-        if (blob.size < 5000) throw new Error('HF 360 too small');
-        console.log('HF sdxl-360-diffusion: ✅ panorama generated!');
-        return await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
-      });
+    // === FIDELIDAD PLANO v3 - ABRIL 2026 === Only Gemini providers (the only free model that sees the plan image) Gemini is the ONLY free model that truly "sees" the plan image
+    // When in faithful mode with plan, we try Gemini FIRST with extended timeout and multiple model variants
+    var planRef = opts.planCropSrc || state.__currentPlanSrc;
+    var fullPlan = state.__currentPlanSrc;
+    var hasPlanRef = planRef && opts.coherent;
 
-      // Flux panorama LoRA
-      providers.push(async () => {
-        const resp = await fetch('https://api-inference.huggingface.co/models/jbilcke-hf/flux-dev-panorama-lora-2', {
-          method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
-          headers: { 'Authorization': `Bearer ${hfKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            inputs: `360 degree equirectangular panorama, ${prompt}, photorealistic, seamless, high detail`,
-            parameters: { width: 1536, height: 640 }
-          })
-        });
-        if (!resp.ok) throw new Error('HF Flux panorama HTTP ' + resp.status);
-        const blob = await resp.blob();
-        if (blob.size < 5000) throw new Error('HF Flux panorama too small');
-        console.log('HF flux-panorama-lora: ✅ panorama generated!');
-        return await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
-      });
-    }
-
-    // Provider 1: Local SD (if configured) — uses img2img when plan available
-    const sdUrl = state.localSdUrl;
-    if (sdUrl) {
-      providers.push(async () => {
-        var planRef = opts.planCropSrc || state.__currentPlanSrc;
-        var endpoint = (planRef && opts.coherent) ? `${sdUrl}/sdapi/v1/img2img` : `${sdUrl}/sdapi/v1/txt2img`;
-        var payload = {
-          prompt: `photorealistic architectural render EXACTLY matching floor plan, ${prompt}, high quality, 8k, precise proportions, exact wall positions`,
-          negative_prompt: opts.faithfulMode ? __FAITHFUL_NEGATIVE : 'cartoon, anime, sketch, low quality, blurry, text, watermark',
-          steps: fast ? 8 : (opts.faithfulMode ? 28 : 20),
-          cfg_scale: opts.faithfulMode ? 8.5 : 7,
-          width: 1024, height: 768,
-          sampler_name: 'DPM++ 2M'
-        };
-        // === MEJORA FIDELIDAD PLANO-RENDER v2 === img2img with high denoising for plan fidelity
-        if (planRef && opts.coherent) {
-          payload.init_images = [planRef];
-          payload.denoising_strength = opts.faithfulMode ? 0.92 : 0.85;
-        }
-        const sdResp = await fetch(endpoint, {
-          method: 'POST', signal: AbortSignal.timeout(fast ? 60000 : 120000),
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!sdResp.ok) throw new Error('SD HTTP ' + sdResp.status);
-        const d = await sdResp.json();
-        if (d.images?.[0]) { console.log('Local SD: ✅ (denoising=' + (payload.denoising_strength || 'txt2img') + ')'); return `data:image/png;base64,${d.images[0]}`; }
-        throw new Error('No image');
-      });
-    }
-
-    // === MEJORA FIDELIDAD PLANO-RENDER v2 === Enhanced OpenRouter Gemini with dual-image reference
+    // Gemini primary — best model for plan-faithful renders
     providers.push(async () => {
       var msgContent = [];
-      var planRef = opts.planCropSrc || state.__currentPlanSrc;
-      var fullPlan = state.__currentPlanSrc;
-      if (planRef && opts.coherent) {
+      if (hasPlanRef) {
         // Send BOTH the full plan AND the room crop for maximum spatial context
         if (fullPlan && planRef !== fullPlan) {
           msgContent.push({ type: 'image_url', image_url: { url: fullPlan, detail: 'high' } });
-          msgContent.push({ type: 'text', text: 'This is the COMPLETE floor plan of the project. Study the full layout carefully.' });
+          msgContent.push({ type: 'text', text: 'IMAGE 1: This is the COMPLETE FLOOR PLAN of the project. Study every wall, door, window position.' });
+          msgContent.push({ type: 'image_url', image_url: { url: planRef, detail: 'high' } });
+          msgContent.push({ type: 'text', text: 'IMAGE 2: This is a CROP of the specific room to render. The walls and openings in this crop define the EXACT shape.' });
+        } else {
+          msgContent.push({ type: 'image_url', image_url: { url: planRef, detail: 'high' } });
         }
-        msgContent.push({ type: 'image_url', image_url: { url: planRef, detail: 'high' } });
-        msgContent.push({ type: 'text', text: `You are an expert architectural 3D renderer with 20 years experience. The attached image${fullPlan && planRef !== fullPlan ? 's show the full project plan AND a crop of the specific room' : ' is a REAL floor plan'}.
+        msgContent.push({ type: 'text', text: `TASK: Generate a photorealistic architectural render of the room shown in the floor plan image(s) above.
 
-Generate a photorealistic interior/exterior render that is EXTREMELY FAITHFUL to this exact plan.
+CRITICAL FIDELITY RULES:
+- The SHAPE of the room (rectangular, L-shaped, etc.) must MATCH the plan exactly
+- Wall positions: reproduce EXACTLY where each wall is in the plan
+- Windows: place them ONLY where the plan shows openings/windows
+- Doors: place them ONLY where the plan shows door arcs or openings
+- Proportions: if the plan shows a room that is wider than deep, the render MUST show that same proportion
+- Do NOT add extra rooms, walls, windows, or doors not in the plan
+- Do NOT change the aspect ratio or shape of the room
 
-ABSOLUTE RULES — VIOLATION = FAILURE:
-1) Every wall position, door, window MUST match the plan positions EXACTLY
-2) Room proportions and dimensions MUST match what is shown — do NOT stretch or compress
-3) Do NOT invent rooms, remove rooms, add windows/doors, or change the layout in ANY way
-4) The spatial relationships between rooms must be IDENTICAL to the plan
-5) Add realistic furniture, materials, lighting appropriate to each space
-6) Camera angle should show the room's actual shape and proportions clearly
-7) Negative: ${__FAITHFUL_NEGATIVE}
+STYLE: Photorealistic, warm natural lighting, luxury materials, 8K quality, Architectural Digest.
+NEGATIVE: ${__FAITHFUL_NEGATIVE}
 
-Render this specific view: ${prompt}` });
+SPECIFIC VIEW: ${prompt}` });
       } else {
         msgContent.push({ type: 'text', text: 'Generate a high quality photorealistic architectural image of: ' + prompt });
       }
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST', signal: AbortSignal.timeout(fast ? 45000 : 90000),
+        method: 'POST', signal: AbortSignal.timeout(hasPlanRef ? 120000 : (fast ? 45000 : 90000)),
         headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBuilder' },
         body: JSON.stringify({ model: __OR_IMAGE_MODELS[0], messages: [{ role: 'user', content: msgContent }], modalities: ['image', 'text'] })
       });
-      if (!resp.ok) throw new Error('OR HTTP ' + resp.status);
+      if (!resp.ok) throw new Error('OR Gemini HTTP ' + resp.status);
       const d = await resp.json();
       const url = __extractImageFromMsg(d.choices?.[0]?.message);
-      if (url) { console.log('OpenRouter Gemini + plan ref: done (faithful=' + !!opts.faithfulMode + ')'); return url; }
+      if (url) { console.log('Gemini primary + plan ref: ✅ (faithful=' + !!opts.faithfulMode + ')'); return url; }
       throw new Error('No image');
     });
 
-    // Provider 3: AI Horde (fast settings)
-    providers.push(async () => {
-      const submitResp = await fetch('https://aihorde.net/api/v2/generate/async', {
-        method: 'POST', signal: AbortSignal.timeout(10000),
-        headers: { 'Content-Type': 'application/json', 'apikey': '0000000000', 'Client-Agent': 'CayenaBot:1.0:cayenabot' },
-        body: JSON.stringify({
-          prompt: `photorealistic architectural render, luxury real estate, ${prompt}, professional photography, exact proportions, precise layout ### ${opts.faithfulMode ? 'different layout, wrong proportions, extra rooms, moved walls, ' : ''}blurry, cartoon, anime, nsfw, nude, person, text, watermark`,
-          params: { width: 1344, height: 768, steps: 25, sampler_name: 'k_euler_a', cfg_scale: 7.5, n: 1, seed: state.__styleSeed || '' },
-          models: ['AlbedoBase XL (SDXL)', 'SDXL 1.0', 'Deliberate', 'stable_diffusion'],
-          nsfw: true, censor_nsfw: false, r2: true, replacement_filter: true
-        })
-      });
-      if (!submitResp.ok) throw new Error('Horde submit HTTP ' + submitResp.status);
-      const { id } = await submitResp.json();
-      if (!id) throw new Error('No job ID');
-      const maxWait = fast ? 75000 : 150000;
-      const t0 = Date.now();
-      while (Date.now() - t0 < maxWait) {
-        await new Promise(r => setTimeout(r, 2500));
-        const ck = await fetch(`https://aihorde.net/api/v2/generate/check/${id}`, { signal: AbortSignal.timeout(5000) });
-        if (!ck.ok) continue;
-        const st = await ck.json();
-        if (st.faulted) throw new Error('Faulted');
-        if (st.done) {
-          const res = await fetch(`https://aihorde.net/api/v2/generate/status/${id}`, { signal: AbortSignal.timeout(10000) });
-          if (!res.ok) throw new Error('Status HTTP ' + res.status);
-          const data = await res.json();
-          const imgUrl = data.generations?.[0]?.img;
-          if (!imgUrl) throw new Error('No image');
-          console.log('AI Horde: ✅');
-          return await __toDataUrl(imgUrl);
-        }
-      }
-      throw new Error('Timeout');
-    });
-
-    // === MEJORA FIDELIDAD 100% + CALIDAD + SWARM v2026 === Together.ai BEFORE Pollinations (higher quality)
-    const togetherKey = state.togetherKey || localStorage.getItem('cayenabot_together_key') || '';
-    if (togetherKey) {
+    // === FIDELIDAD PLANO v3 === Gemini fallback with alternate model
+    if (hasPlanRef && __OR_IMAGE_MODELS.length > 1) {
       providers.push(async () => {
-        const r = await fetch('https://api.together.xyz/v1/images/generations', {
-          method: 'POST', signal: AbortSignal.timeout(30000),
-          headers: { 'Authorization': `Bearer ${togetherKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell-Free', prompt, width: 1344, height: 768, steps: opts.faithfulMode ? 8 : 4, n: 1, response_format: 'b64_json' })
+        var msgContent2 = [];
+        msgContent2.push({ type: 'image_url', image_url: { url: planRef, detail: 'high' } });
+        msgContent2.push({ type: 'text', text: `Look at this floor plan carefully. Generate a photorealistic interior render that matches the EXACT room shape, wall positions, and window locations from this plan. Room: ${prompt}. Style: luxury, warm light, 8K.` });
+        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST', signal: AbortSignal.timeout(90000),
+          headers: { 'Authorization': `Bearer ${state.orKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': 'CayenaBuilder' },
+          body: JSON.stringify({ model: __OR_IMAGE_MODELS[1], messages: [{ role: 'user', content: msgContent2 }], modalities: ['image', 'text'] })
         });
-        if (!r.ok) throw new Error('Together HTTP ' + r.status);
-        const d = await r.json();
-        const b64 = d.data?.[0]?.b64_json;
-        if (!b64) throw new Error('No b64');
-        console.log('Together: ✅');
-        return `data:image/png;base64,${b64}`;
+        if (!resp.ok) throw new Error('OR Gemini alt HTTP ' + resp.status);
+        const d = await resp.json();
+        const url = __extractImageFromMsg(d.choices?.[0]?.message);
+        if (url) { console.log('Gemini alt model + plan ref: ✅'); return url; }
+        throw new Error('No image');
       });
     }
 
-    // === MEJORA FIDELIDAD 100% + CALIDAD + SWARM v2026 === Pollinations as fallback (after Together.ai)
-    const seed = opts.faithfulMode ? (state.__styleSeed || Date.now()) : (Date.now() + Math.floor(Math.random() * 10000));
-    const negParam = opts.coherent ? '&negative=' + encodeURIComponent('different layout, wrong proportions, extra rooms, moved walls, blurry, cartoon, smearing, melting, text, watermark') : '';
-    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 400))}?width=1344&height=768&model=flux&nologo=true&seed=${seed}${negParam}&enhance=true`;
-    providers.push(async () => {
-      const pUrl = `https://corsproxy.io/?url=${encodeURIComponent(pollUrl)}`;
-      const r = await fetch(pUrl, { signal: AbortSignal.timeout(fast ? 30000 : 60000) });
-      if (!r.ok) throw new Error('Pollinations HTTP ' + r.status);
-      const blob = await r.blob();
-      if (blob.size < 1000 || !blob.type.startsWith('image')) throw new Error('Not an image');
-      console.log('Pollinations: ✅ (seed=' + seed + ', 1344x768)');
-      return await __toDataUrl(blob);
-    });
-
-    // COHERENT mode: try providers in ORDER (not race) for consistent style
-    // RACE mode: fire all simultaneously for speed (single renders from chat)
+    // === FIDELIDAD PLANO v3 === All other providers removed — Gemini only
+    // COHERENT mode: try Gemini models in ORDER
+    // RACE mode: fire Gemini primary + alt simultaneously
     let result = null;
     if (opts.coherent && providers.length > 0) {
       // Try each provider in order — once one works, stick with it for all renders
@@ -7248,9 +7140,10 @@ async function processUploadedPlan(file) {
     analysisDiv.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:8px;color:var(--muted)">Analizando plano con AI (extracción estructurada)...</div></div>';
 
     try {
-      const visionModel = state.freeModels?.find(m => m.toLowerCase().includes('vl') || m.toLowerCase().includes('vision')) || 'qwen/qwen-2.5-vl-72b-instruct:free';
+      // === FIDELIDAD PLANO v3 - ABRIL 2026 === Prefer Gemini for plan analysis (better at diagrams/layouts)
+      const visionModel = state.freeModels?.find(m => /gemini.*vl|gemini.*flash/i.test(m)) || state.freeModels?.find(m => /vl|vision/i.test(m)) || 'qwen/qwen-2.5-vl-72b-instruct:free';
 
-      // === MEJORA FIDELIDAD PLANO-RENDER v2 === Two-pass analysis: structured JSON + human-readable
+      // Structured JSON extraction for render fidelity
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         signal: AbortSignal.timeout(90000),
@@ -7261,9 +7154,9 @@ async function processUploadedPlan(file) {
             role: 'user',
             content: [
               { type: 'image_url', image_url: { url: src, detail: 'high' } },
-              { type: 'text', text: `Eres un arquitecto profesional experto en lectura de planos. Analiza esta imagen de plano arquitectónico con máxima precisión y objetividad.
+              { type: 'text', text: `Eres un topógrafo y arquitecto experto en lectura de planos. Analiza esta imagen de plano CON MÁXIMA EXACTITUD.
 
-Devuelve ÚNICAMENTE un JSON válido (sin texto extra, sin markdown):
+Devuelve SOLO un JSON válido (nada de texto extra, nada de markdown):
 {
   "project_name": "Nombre deducido o 'Proyecto Cayena'",
   "overall_description": "Descripción breve del layout general",
@@ -7273,22 +7166,26 @@ Devuelve ÚNICAMENTE un JSON válido (sin texto extra, sin markdown):
       "name": "Sala Principal",
       "bbox": {"x": 12, "y": 25, "width": 35, "height": 40},
       "estimated_dimensions": "6.8m x 5.1m",
-      "orientation": "norte-sur",
-      "key_features": "ventanas al norte, conexión a pasillo, cocina integrada L",
+      "room_shape": "rectangular",
+      "wall_north": "ventanal completo con vista a terraza",
+      "wall_south": "puerta de acceso desde pasillo",
+      "wall_east": "abertura a cocina integrada tipo L",
+      "wall_west": "muro cerrado",
+      "key_features": "ventanas al norte, cocina L este, conexión pasillo",
       "adjacent_spaces": "pasillo central al sur, cocina al este, balcón al norte",
-      "detailed_render_prompt": "Sala principal exactamente según el plano: dimensiones 6.8x5.1m, ventanas completas al norte, cocina tipo L en lado este, piso porcelanato claro, techo 2.85m, iluminación natural fuerte, paredes blancas con molduras simples, puertas y conexiones exactas del plano"
+      "detailed_render_prompt": "Habitación RECTANGULAR de 6.8x5.1m. Pared NORTE: ventanal completo de piso a techo con vista a terraza. Pared SUR: puerta de acceso. Pared ESTE: abertura a cocina integrada L. Pared OESTE: muro cerrado. Piso porcelanato claro, techo 2.85m, iluminación natural fuerte desde ventanas norte."
     }
   ]
 }
 
-Reglas estrictas:
-- Extrae códigos REALES del plano (E-1, PB-01, A-3, etc.)
-- bbox son PORCENTAJES (0-100) de la imagen: x,y = esquina superior izquierda del espacio
-- Calcula bbox lo más preciso posible observando la posición de cada espacio
-- NO inventes elementos que no estén en el plano
-- Sé ultra específico con distribución, proporciones, conexiones y orientación
-- En detailed_render_prompt describe EXACTAMENTE lo que se ve: posición de paredes, ventanas, puertas, dimensiones
-- Lista TODOS los espacios visibles (15-40 típicamente)` }
+REGLAS MUY ESTRICTAS:
+- Extrae códigos REALES del plano (E-1, PB-01, A-3, Hab. Master, etc.)
+- bbox: PORCENTAJES (0-100) de la imagen. x,y = esquina superior izquierda. Sé MUY preciso.
+- room_shape: "rectangular", "L-shaped", "square", "irregular"
+- Describe CADA PARED por separado (wall_north, wall_south, wall_east, wall_west): qué tiene cada una
+- En detailed_render_prompt: empieza con la FORMA del cuarto, luego describe cada pared
+- NO inventes NADA que no esté en el plano
+- Lista TODOS los espacios visibles (10-40 típicamente)` }
             ]
           }]
         })
